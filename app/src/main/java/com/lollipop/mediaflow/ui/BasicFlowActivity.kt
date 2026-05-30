@@ -6,17 +6,13 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.CallSuper
-import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.graphics.Insets
 import androidx.core.view.isVisible
-import androidx.core.view.updateLayoutParams
 import androidx.drawerlayout.widget.DrawerLayout
 import com.lollipop.mediaflow.R
-import com.lollipop.mediaflow.data.MediaInfo
+import com.lollipop.mediaflow.data.PlaybackMode
 import com.lollipop.mediaflow.databinding.ActivityFlowBinding
-import com.lollipop.mediaflow.page.flow.FlowSidePanelDelegate
 import com.lollipop.mediaflow.tools.Preferences
-import com.lollipop.mediaflow.ui.view.SimpleGestureLayout
 
 abstract class BasicFlowActivity : CustomOrientationActivity() {
 
@@ -25,16 +21,15 @@ abstract class BasicFlowActivity : CustomOrientationActivity() {
     }
 
     protected var isFullscreen = false
-        private set
 
     protected var isDecorationShown = true
         private set
 
     protected var endGuideSize = 0
 
-    protected val sidePanelDelegate by lazy {
-        FlowSidePanelDelegate(lifecycle, basicBinding.sidePanelContent, ::onSideItemClick)
-    }
+    protected open val showPlayModeBtn = true
+
+    protected open val showGestureBtn = true
 
     private val backBtnVisibleFilter by lazy {
         PreferenceVisibleFilter(basicBinding.backBtn)
@@ -44,23 +39,29 @@ abstract class BasicFlowActivity : CustomOrientationActivity() {
         VisibleFilterGroup.Or(basicBinding.menuBar)
     }
 
-    private val sidePanelBtnVisibleFilter by lazy {
-        PreferenceVisibleFilter(basicBinding.sidePanelBtn).also {
-            menuBarVisibleFilter.register(it)
-        }
-    }
-
-    private val fullscreenBtnVisibleFilter by lazy {
-        FullscreenBtnVisibleFilter(basicBinding.fullscreenBtn).also {
-            menuBarVisibleFilter.register(it)
-        }
-    }
-
     private val menuBtnVisibleFilter by lazy {
         PreferenceVisibleFilter(basicBinding.menuBtn).also {
             menuBarVisibleFilter.register(it)
         }
     }
+
+    private val playModeBtnVisibleFilter by lazy {
+        PreferenceVisibleFilter(basicBinding.playModeBtn).also {
+            menuBarVisibleFilter.register(it)
+        }
+    }
+
+    private val gestureBtnVisibleFilter by lazy {
+        PreferenceVisibleFilter(basicBinding.gestureBtn).also {
+            menuBarVisibleFilter.register(it)
+        }
+    }
+
+    protected var isGestureControlEnabled = Preferences.isGestureControlEnabled.get()
+        private set
+
+    protected var playbackMode = Preferences.playbackMode.get()
+        private set
 
     private val titleVisibleFilter by lazy {
         PreferenceVisibleFilter(basicBinding.titleView)
@@ -89,137 +90,109 @@ abstract class BasicFlowActivity : CustomOrientationActivity() {
         basicBinding.backBtn.setOnClickListener {
             onBackPressedDispatcher.onBackPressed()
         }
-        basicBinding.sidePanelBtn.setOnClickListener {
-            changeSidePanel()
+        basicBinding.playModeBtn.setOnClickListener {
+            changePlaybackMode()
         }
-        basicBinding.fullscreenBtn.setOnClickListener {
-            isFullscreen = !isFullscreen
-            updateFullscreen()
+        basicBinding.gestureBtn.setOnClickListener {
+            toggleGestureControl()
         }
-        initSidePanelGesture()
-        sidePanelDelegate.onCreate()
+        updatePlayModeBtn()
+        updateGestureBtn()
         basicBinding.drawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
         updateBlur()
     }
 
     override fun onResume() {
         super.onResume()
+        playbackMode = Preferences.playbackMode.get()
+        updatePlayModeBtn()
         backBtnVisibleFilter.preference.setVisible(Preferences.isShowBackBtn.get())
-        sidePanelBtnVisibleFilter.preference.setVisible(Preferences.isShowSidePanelBtn.get())
-        fullscreenBtnVisibleFilter.preference.setVisible(Preferences.isShowFullscreenBtn.get())
-        fullscreenBtnVisibleFilter.update(currentOrientation)
         menuBtnVisibleFilter.preference.setVisible(Preferences.isShowDrawerBtn.get())
+        playModeBtnVisibleFilter.preference.setVisible(showPlayModeBtn && Preferences.isShowPlayModeBtn.get())
+        gestureBtnVisibleFilter.preference.setVisible(showGestureBtn && Preferences.isShowGestureBtn.get())
+        if (!showGestureBtn || !Preferences.isShowGestureBtn.get()) {
+            isGestureControlEnabled = false
+            Preferences.isGestureControlEnabled.set(false)
+        } else {
+            isGestureControlEnabled = Preferences.isGestureControlEnabled.get()
+        }
+        updateGestureBtn()
         titleVisibleFilter.preference.setVisible(Preferences.isShowTitle.get())
         tagVisibleFilter.preference.setVisible(Preferences.isShowTag.get())
-        basicBinding.sidePanelGestureView.isVisible = Preferences.isSidePanelGestureEnable.get()
-    }
-
-    protected fun changeSidePanel(isShow: Boolean = !basicBinding.sidePanel.isVisible) {
-        basicBinding.sidePanel.isVisible = isShow
-        basicBinding.endGuideLine.updateLayoutParams<ConstraintLayout.LayoutParams> {
-            guideEnd = if (isShow) {
-                minEdge
-            } else {
-                endGuideSize
-            }
-        }
-        basicBinding.sidePanelBtn.setImageResource(
-            if (isShow) {
-                R.drawable.right_panel_close_24
-            } else {
-                R.drawable.right_panel_open_24
-            }
-        )
-        onSidePanelUpdate(isShow)
-    }
-
-    private fun initSidePanelGesture() {
-        basicBinding.sidePanelGestureView.also { view ->
-            view.onGesture {
-                onSidePanelGesture(it)
-            }
-            view.registerGesture(
-                SimpleGestureLayout.GestureType.LeftToRight,
-            )
-            view.registerGesture(
-                SimpleGestureLayout.GestureType.RightToLeft,
-            )
-        }
-    }
-
-    private fun onSidePanelGesture(type: SimpleGestureLayout.GestureType) {
-        when (type) {
-            SimpleGestureLayout.GestureType.LeftToRight -> {
-                changeSidePanel(false)
-            }
-
-            SimpleGestureLayout.GestureType.RightToLeft -> {
-                changeSidePanel(true)
-            }
-
-            else -> {}
-        }
     }
 
     override fun filterGuidelineInsets(insets: Insets): Insets {
         endGuideSize = insets.right
-        if (isSidePanelShown()) {
-            return Insets.of(insets.left, insets.top, minEdge, insets.bottom)
-        }
         return super.filterGuidelineInsets(insets)
     }
 
     @CallSuper
     override fun onWindowInsetsChanged(left: Int, top: Int, right: Int, bottom: Int) {
-        basicBinding.sidePanel.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-            rightMargin = right
-        }
-        sidePanelDelegate.onInsetsChanged(left, top, right, bottom)
-    }
-
-    protected fun isSidePanelShown(): Boolean {
-        return basicBinding.sidePanel.isVisible
-    }
-
-    protected open fun onSidePanelUpdate(isShown: Boolean) {
-
-    }
-
-    protected abstract fun onSideItemClick(mediaInfo: MediaInfo.File, position: Int)
-
-    protected fun updateSideMediaData(list: List<MediaInfo.File>) {
-        sidePanelDelegate.onDataChanged(list)
-    }
-
-    protected fun currentSidePosition(): Int {
-        return sidePanelDelegate.currentPosition()
-    }
-
-    protected fun onSideSelected(mediaInfo: MediaInfo?, position: Int) {
-        sidePanelDelegate.onSelected(mediaInfo, position)
-    }
-
-    protected fun removeSideAt(position: Int) {
-        sidePanelDelegate.removeAt(position)
     }
 
     protected fun updateFullscreen() {
-        if (isFullscreen || currentOrientation == Orientation.LANDSCAPE) {
-            basicBinding.fullscreenBtn.setImageResource(R.drawable.fullscreen_exit_24)
+        if (isFullscreen) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             hideSystemUI()
         } else {
-            basicBinding.fullscreenBtn.setImageResource(R.drawable.fullscreen_24)
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             showSystemUI()
         }
-        fullscreenBtnVisibleFilter.update(currentOrientation)
+    }
+
+    private fun changePlaybackMode() {
+        playbackMode = playbackMode.next()
+        Preferences.playbackMode.set(playbackMode)
+        updatePlayModeBtn()
+        onPlaybackModeChanged(playbackMode)
+    }
+
+    private fun updatePlayModeBtn() {
+        basicBinding.playModeBtn.setImageResource(
+            when (playbackMode) {
+                PlaybackMode.Sequential -> R.drawable.play_arrow_24
+                PlaybackMode.Shuffle -> R.drawable.shuffle_24
+            }
+        )
+    }
+
+    private fun toggleGestureControl() {
+        isGestureControlEnabled = !isGestureControlEnabled
+        Preferences.isGestureControlEnabled.set(isGestureControlEnabled)
+        updateGestureBtn()
+        onGestureControlChanged(isGestureControlEnabled)
+    }
+
+    private fun updateGestureBtn() {
+        basicBinding.gestureBtn.setImageResource(
+            if (isGestureControlEnabled) R.drawable.gesture_24 else R.drawable.gesture_off_24
+        )
+    }
+
+    protected open fun onPlaybackModeChanged(mode: PlaybackMode) {
+
+    }
+
+    protected open fun onGestureControlChanged(enabled: Boolean) {
+
     }
 
     protected fun changeDecoration(isVisibility: Boolean) {
         isDecorationShown = isVisibility
+        basicBinding.decorationPanel.animate().cancel()
         if (isVisibility) {
+            basicBinding.decorationPanel.alpha = 0F
             basicBinding.decorationPanel.visibility = View.VISIBLE
+            basicBinding.decorationPanel.animate()
+                .alpha(1F)
+                .setDuration(250L)
+                .start()
         } else {
-            basicBinding.decorationPanel.visibility = View.GONE
+            basicBinding.decorationPanel.animate()
+                .alpha(0F)
+                .setDuration(200L)
+                .withEndAction { basicBinding.decorationPanel.visibility = View.GONE }
+                .start()
         }
     }
 
@@ -299,22 +272,13 @@ abstract class BasicFlowActivity : CustomOrientationActivity() {
         }
     }
 
+    protected val isDrawerOpen: Boolean
+        get() = basicBinding.drawerLayout.isDrawerOpen(basicBinding.drawerPanel)
+
     protected abstract fun onDrawerChanged(isOpen: Boolean)
 
     protected abstract fun createDrawerPanel(): View
 
     protected abstract fun createContentPanel(): View
-
-    protected class FullscreenBtnVisibleFilter(
-        targetView: View,
-    ) : PreferenceVisibleFilter(targetView) {
-
-        val orientation = pair(true)
-
-        fun update(o: Orientation) {
-            orientation.setVisible(o == Orientation.PORTRAIT)
-        }
-
-    }
 
 }

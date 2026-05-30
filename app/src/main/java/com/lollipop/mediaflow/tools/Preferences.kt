@@ -5,6 +5,9 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.edit
+import com.lollipop.mediaflow.data.MediaSort
+import com.lollipop.mediaflow.data.PlaybackMode
+import org.json.JSONArray
 
 object Preferences {
 
@@ -28,18 +31,9 @@ object Preferences {
     val videoTouchMaxRangeRatioYRange = 0.1F..1F
 
     /**
-     * 是否开启快速移动到回收站的模式
+     * 手势操作区域（亮度/音量）屏幕占比范围
      */
-    val isQuickArchiveEnable by lazy {
-        BooleanItem(name = "isQuickArchiveEnable", def = false)
-    }
-
-    /**
-     * 是否显示其他快速移动到回收站的按钮
-     */
-    val isShowOtherQuickArchiveButton by lazy {
-        BooleanItem(name = "isShowOtherQuickArchiveButton", def = true)
-    }
+    val gestureSideRegionRatioRange = 0.05F..0.35F
 
     /**
      * 手指手势变化进度时的基础倍率
@@ -49,10 +43,17 @@ object Preferences {
     }
 
     /**
-     * 倍速播放时候的速度
+     * 倍速播放时候的速度（长按屏幕时的倍速）
      */
     val playbackSpeed by lazy {
         FloatItem(name = "playbackSpeed", 2F)
+    }
+
+    /**
+     * 默认视频播放速度
+     */
+    val defaultVideoSpeed by lazy {
+        FloatItem(name = "defaultVideoSpeed", 1F)
     }
 
     /**
@@ -63,6 +64,13 @@ object Preferences {
     }
 
     /**
+     * 手势操作区域（亮度/音量）屏幕占比
+     */
+    val gestureSideRegionRatio by lazy {
+        FloatItem(name = "gestureSideRegionRatio", 0.3F)
+    }
+
+    /**
      * 将视频背景渲染为同色的高斯模糊版本
      */
     val isBlurVideoBackground by lazy {
@@ -70,24 +78,26 @@ object Preferences {
     }
 
     /**
-     * 是否显示全屏按钮
-     */
-    val isShowFullscreenBtn by lazy {
-        BooleanItem(name = "isShowFullscreenBtn", true)
-    }
-
-    /**
-     * 是否显示侧边栏按钮
-     */
-    val isShowSidePanelBtn by lazy {
-        BooleanItem(name = "isShowSidePanelBtn", true)
-    }
-
-    /**
-     * 是否显示抽屉按钮
+     * 是否显示播放列表按钮
      */
     val isShowDrawerBtn by lazy {
         BooleanItem(name = "isShowDrawerBtn", true)
+    }
+
+    val isShowPlayModeBtn by lazy {
+        BooleanItem(name = "isShowPlayModeBtn", true)
+    }
+
+    val isShowGestureBtn by lazy {
+        BooleanItem(name = "isShowGestureBtn", false)
+    }
+
+    val isGestureControlEnabled by lazy {
+        BooleanItem(name = "isGestureControlEnabled", false)
+    }
+
+    val playbackMode by lazy {
+        PlaybackModeItem(name = "playbackMode", PlaybackMode.Sequential)
     }
 
     /**
@@ -111,11 +121,40 @@ object Preferences {
         BooleanItem(name = "isShowTag", true)
     }
 
+    val customVideoSuffixes by lazy {
+        StringSetItem(name = "customVideoSuffixes")
+    }
+
+    val shuffleSeed by lazy {
+        LongItem(name = "shuffleSeed", System.currentTimeMillis())
+    }
+
     /**
-     * 是否开启侧边栏手势
+     * 公开视频排序
      */
-    val isSidePanelGestureEnable by lazy {
-        BooleanItem(name = "isSidePanelGestureEnable", false)
+    val publicVideoSort by lazy {
+        MediaSortItem(name = "publicVideoSort", MediaSort.DateDesc)
+    }
+
+    /**
+     * 公开图片排序
+     */
+    val publicPhotoSort by lazy {
+        MediaSortItem(name = "publicPhotoSort", MediaSort.DateDesc)
+    }
+
+    /**
+     * 私有视频排序
+     */
+    val privateVideoSort by lazy {
+        MediaSortItem(name = "privateVideoSort", MediaSort.DateDesc)
+    }
+
+    /**
+     * 私有图片排序
+     */
+    val privatePhotoSort by lazy {
+        MediaSortItem(name = "privatePhotoSort", MediaSort.DateDesc)
     }
 
     abstract class TypedItem<T> {
@@ -141,6 +180,36 @@ object Preferences {
         protected abstract fun getPreferencesValue(): T
 
         protected abstract fun setPreferencesValue(value: T)
+
+    }
+
+    class MediaSortItem(
+        val name: String,
+        val def: MediaSort
+    ) : TypedItem<MediaSort>() {
+        override fun getPreferencesValue(): MediaSort {
+            val key = PreferencesDelegate.get(name = name, def = def.key)
+            return MediaSort.findByKey(key) ?: def
+        }
+
+        override fun setPreferencesValue(value: MediaSort) {
+            PreferencesDelegate.set(name = name, value = value.key)
+        }
+
+    }
+
+    class PlaybackModeItem(
+        val name: String,
+        val def: PlaybackMode
+    ) : TypedItem<PlaybackMode>() {
+        override fun getPreferencesValue(): PlaybackMode {
+            val key = PreferencesDelegate.get(name = name, def = def.key)
+            return PlaybackMode.findByKey(key)
+        }
+
+        override fun setPreferencesValue(value: PlaybackMode) {
+            PreferencesDelegate.set(name = name, value = value.key)
+        }
 
     }
 
@@ -210,6 +279,48 @@ object Preferences {
 
         override fun setPreferencesValue(value: Float) {
             PreferencesDelegate.set(name = name, value = value)
+        }
+
+    }
+
+    class StringSetItem(
+        val name: String
+    ) : TypedItem<Set<String>>() {
+
+        override fun getPreferencesValue(): Set<String> {
+            val json = PreferencesDelegate.get(name = name, def = "")
+            if (json.isEmpty()) return emptySet()
+            return try {
+                val array = JSONArray(json)
+                val set = mutableSetOf<String>()
+                for (i in 0 until array.length()) {
+                    set.add(array.getString(i))
+                }
+                set
+            } catch (e: Exception) {
+                emptySet()
+            }
+        }
+
+        override fun setPreferencesValue(value: Set<String>) {
+            val array = JSONArray()
+            value.forEach { array.put(it) }
+            PreferencesDelegate.set(name = name, value = array.toString())
+        }
+
+        fun add(suffix: String) {
+            val current = get().toMutableSet()
+            val normalized = suffix.trim().lowercase().removePrefix(".")
+            if (normalized.isNotEmpty()) {
+                current.add(normalized)
+                set(current)
+            }
+        }
+
+        fun remove(suffix: String) {
+            val current = get().toMutableSet()
+            current.remove(suffix)
+            set(current)
         }
 
     }

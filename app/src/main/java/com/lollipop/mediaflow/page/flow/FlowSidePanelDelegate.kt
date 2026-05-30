@@ -162,6 +162,10 @@ class FlowSidePanelDelegate(
             holder.bind(mediaData[position], selectionTracker.isSelected(position))
         }
 
+        override fun onViewRecycled(holder: GalleryItemHolder) {
+            holder.onRecycled()
+        }
+
         override fun getItemCount(): Int {
             return mediaData.size
         }
@@ -184,8 +188,16 @@ class FlowSidePanelDelegate(
         }
 
         fun bind(mediaInfo: MediaInfo, isSelected: Boolean) {
-            Glide.with(binding.imageView).load(mediaInfo.uri).into(binding.imageView)
+            Glide.with(binding.imageView)
+                .load(mediaInfo.uri)
+                .override(200)
+                .centerCrop()
+                .into(binding.imageView)
             binding.flagView.isVisible = isSelected
+        }
+
+        fun onRecycled() {
+            Glide.with(binding.imageView).clear(binding.imageView)
         }
 
     }

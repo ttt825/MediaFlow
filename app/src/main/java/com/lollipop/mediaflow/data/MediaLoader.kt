@@ -7,9 +7,13 @@ import android.provider.DocumentsContract
 import androidx.exifinterface.media.ExifInterface
 import com.lollipop.mediaflow.tools.CursorColumn
 import com.lollipop.mediaflow.tools.LLog.Companion.registerLog
+import com.lollipop.mediaflow.tools.Preferences
 import com.lollipop.mediaflow.tools.optLong
 import com.lollipop.mediaflow.tools.optString
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.LinkedList
+import kotlin.text.ifEmpty
 
 object MediaLoader {
 
@@ -291,15 +295,20 @@ object MediaLoader {
                 docId = cursorLine.documentId
             )
         }
-        val mediaType = findMediaType(cursorLine.mimeType)
+        val mediaType = findMediaType(cursorLine.mimeType, cursorLine.displayName)
         if (mediaType != null) {
+            val effectiveMimeType = if (cursorLine.mimeType.startsWith(MediaType.Video.mimePrefix)) {
+                cursorLine.mimeType
+            } else {
+                "video/mp4"
+            }
             return MediaInfo.File(
                 uri = cursorLine.fileUri,
                 parentDocId = cursorLine.parentDocumentId,
                 name = cursorLine.displayName,
                 path = path,
                 size = cursorLine.size,
-                mimeType = cursorLine.mimeType,
+                mimeType = effectiveMimeType,
                 lastModified = cursorLine.lastModified,
                 rootUri = cursorLine.treeUri,
                 mediaType = mediaType,
@@ -316,6 +325,57 @@ object MediaLoader {
         val rootUri = cursorLine.treeUri
         val docId = cursorLine.documentId
         return SubtitleFile.parse(uri = uri, name, rootUri = rootUri, docId = docId)
+    }
+
+    suspend fun loadMediaFileSync(context: Context, uri: Uri): MediaInfo.File? {
+        log.d("loadMediaFileSync uri = $uri")
+        return withContext(Dispatchers.IO) {
+            try {
+                // 仅查询你需要的字段以提升性能
+                val projection = arrayOf(
+                    Column.DisplayName.key,
+                    Column.MimeType.key,
+                    Column.Size.key,
+                )
+                val uriString = uri.toString()
+                val cursorLine = CursorLine(
+                    treeUri = Uri.EMPTY,
+                    parentDocumentId = uriString
+                )
+                cursorLine.fileUri = uri
+                context.contentResolver.query(
+                    uri, projection, null, null, null
+                )?.use { cursor ->
+                    if (cursor.moveToNext()) {
+                        cursorLine.documentId = uriString
+                        cursorLine.displayName = cursor.optString(Column.DisplayName)
+                        cursorLine.mimeType = cursor.optString(Column.MimeType)
+                        cursorLine.size = cursor.optLong(Column.Size)
+                    }
+                }
+                val mediaType = findMediaType(cursorLine.mimeType, cursorLine.displayName) ?: return@withContext null
+                val effectiveMimeType = if (cursorLine.mimeType.startsWith(MediaType.Video.mimePrefix)) {
+                    cursorLine.mimeType
+                } else {
+                    "video/mp4"
+                }
+                return@withContext MediaInfo.File(
+                    uri = cursorLine.fileUri,
+                    parentDocId = "",
+                    name = cursorLine.displayName,
+                    path = uriString,
+                    size = cursorLine.size,
+                    mimeType = effectiveMimeType,
+                    lastModified = cursorLine.lastModified,
+                    rootUri = cursorLine.treeUri,
+                    mediaType = mediaType,
+                    docId = cursorLine.documentId
+                )
+            } catch (e: Throwable) {
+                log.e("loadMediaFileSync", e)
+            }
+            return@withContext null
+        }
     }
 
     suspend fun loadDirectorySync(
@@ -365,12 +425,19 @@ object MediaLoader {
         }
     }
 
-    private fun findMediaType(mimeType: String): MediaType? {
+    private fun findMediaType(mimeType: String, displayName: String = ""): MediaType? {
         return when {
             mimeType.startsWith(MediaType.Image.mimePrefix) -> MediaType.Image
             mimeType.startsWith(MediaType.Video.mimePrefix) -> MediaType.Video
+            displayName.isNotEmpty() && isCustomVideoSuffix(displayName) -> MediaType.Video
             else -> null
         }
+    }
+
+    private fun isCustomVideoSuffix(displayName: String): Boolean {
+        val suffix = displayName.substringAfterLast('.', "").lowercase()
+        if (suffix.isEmpty()) return false
+        return Preferences.customVideoSuffixes.get().contains(suffix)
     }
 
     enum class Column(

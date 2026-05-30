@@ -35,17 +35,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.net.toUri
-import androidx.lifecycle.lifecycleScope
 import com.lollipop.mediaflow.BuildConfig
 import com.lollipop.mediaflow.R
 import com.lollipop.mediaflow.tools.LLog.Companion.registerLog
 import com.lollipop.mediaflow.tools.Preferences
-import com.lollipop.mediaflow.tools.safeRun
 import com.lollipop.mediaflow.ui.BasicComposeActivity
 import com.lollipop.mediaflow.ui.theme.currentThemeColor
-import com.lollipop.mediaflow.upgrade.GithubApiModel
-import kotlinx.coroutines.launch
 
 
 class PreferencesActivity : BasicComposeActivity() {
@@ -64,87 +59,20 @@ class PreferencesActivity : BasicComposeActivity() {
         return "${(float * 100).toInt()}%"
     }
 
-    private val appUpdateState = mutableStateOf(UpdateState.Idle)
-    private val appUpdateBody = mutableStateOf("")
-    private var appUpdateUrl = mutableStateOf("")
-
     private val log by lazy {
         registerLog()
-    }
-
-    private fun onUpdateButtonClick() {
-        if (appUpdateState.value == UpdateState.HasUpdate) {
-            safeRun {
-                val url = appUpdateUrl.value
-                val intent = Intent(Intent.ACTION_VIEW, url.toUri())
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-            }
-            return
-        }
-        appUpdateState.value = UpdateState.Fetching
-        val currentVersionCode = BuildConfig.VERSION_CODE
-        lifecycleScope.launch {
-            GithubApiModel.fetch().onSuccess { info ->
-                if (info.versionCode > currentVersionCode) {
-                    val url = info.assets.firstOrNull {
-                        it.name.endsWith("apk", ignoreCase = true)
-                    }?.url ?: ""
-                    if (url.isNotEmpty()) {
-                        appUpdateState.value = UpdateState.HasUpdate
-                        appUpdateBody.value = info.tagName + "\n" + info.updateInfo
-                        appUpdateUrl.value = url
-                    } else {
-                        appUpdateState.value = UpdateState.NoUpdate
-                    }
-                } else {
-                    appUpdateState.value = UpdateState.NoUpdate
-                }
-                log.i(
-                    """
-                                GithubApiModel.fetch()
-                                tagName = ${info.tagName}
-                                versionName = ${info.versionName}
-                                versionCode = ${info.versionCode}
-                                assets = ${info.assets.joinToString(separator = "\n") { "${it.name} - ${it.url}" }}
-                                updateInfo = ${info.updateInfo}
-                            """.trimIndent()
-                )
-            }.onFailure {
-                appUpdateState.value = UpdateState.NoUpdate
-                log.e("GithubApiModel.fetch()", it)
-            }
-        }
-    }
-
-    private fun openGitHub() {
-        safeRun {
-            val url = "https://github.com/Mr-XiaoLiang/MediaFlow"
-            val intent = Intent(Intent.ACTION_VIEW, url.toUri())
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(intent)
-        }
-    }
-
-    private fun openQQ() {
-        safeRun {
-            val url = "https://qm.qq.com/q/8ezA5OKSWc"
-            val intent = Intent(Intent.ACTION_VIEW, url.toUri())
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(intent)
-        }
     }
 
     @Composable
     override fun Content(innerPadding: PaddingValues) {
         val activity = this
         var playbackSpeed by remember { mutableFloatStateOf(Preferences.playbackSpeed.get()) }
+        var defaultVideoSpeed by remember { mutableFloatStateOf(Preferences.defaultVideoSpeed.get()) }
         var videoTouchSeekBaseWeight by remember { mutableFloatStateOf(Preferences.videoTouchSeekBaseWeight.get()) }
-        var videoTouchMaxRangeRatioY by remember { mutableFloatStateOf(Preferences.videoTouchMaxRangeRatioY.get()) }
-        var playbackSpeedValue by remember { mutableStateOf(percentage(playbackSpeed)) }
-        val isQuickArchiveEnable by remember { Preferences.isQuickArchiveEnable.state }
-        val isShowOtherQuickArchiveButton by remember { Preferences.isShowOtherQuickArchiveButton.state }
+        var gestureSideRegionRatio by remember { mutableFloatStateOf(Preferences.gestureSideRegionRatio.get()) }
         val isBlurVideoBackground by remember { Preferences.isBlurVideoBackground.state }
+        var playbackSpeedValue by remember { mutableStateOf(percentage(playbackSpeed)) }
+        var defaultVideoSpeedValue by remember { mutableStateOf(percentage(defaultVideoSpeed)) }
         var videoTouchSeekBaseWeightValue by remember {
             mutableStateOf(
                 percentage(
@@ -152,20 +80,12 @@ class PreferencesActivity : BasicComposeActivity() {
                 )
             )
         }
-        var videoTouchMaxRangeRatioYValue by remember {
-            mutableStateOf(
-                percentage(
-                    videoTouchMaxRangeRatioY
-                )
-            )
+        var gestureSideRegionRatioValue by remember {
+            mutableStateOf(percentage(gestureSideRegionRatio))
         }
-        val updateState by remember { appUpdateState }
-        val updateBody by remember { appUpdateBody }
-
-        val isSidePanelGestureEnable by remember { Preferences.isSidePanelGestureEnable.state }
-        val isShowFullscreenBtn by remember { Preferences.isShowFullscreenBtn.state }
-        val isShowSidePanelBtn by remember { Preferences.isShowSidePanelBtn.state }
         val isShowDrawerBtn by remember { Preferences.isShowDrawerBtn.state }
+        val isShowPlayModeBtn by remember { Preferences.isShowPlayModeBtn.state }
+        val isShowGestureBtn by remember { Preferences.isShowGestureBtn.state }
         val isShowBackBtn by remember { Preferences.isShowBackBtn.state }
         val isShowTitle by remember { Preferences.isShowTitle.state }
         val isShowTag by remember { Preferences.isShowTag.state }
@@ -178,7 +98,26 @@ class PreferencesActivity : BasicComposeActivity() {
             PreferencesGroup {
                 PreferencesSlide(
                     name = stringResource(
-                        id = R.string.label_touch_playback_speed,
+                        id = R.string.label_default_video_speed,
+                        defaultVideoSpeedValue
+                    ),
+                    valueRange = Preferences.playbackSpeedRange,
+                    value = defaultVideoSpeed,
+                    steps = getSteps(Preferences.playbackSpeedRange, 0.01F),
+                    onValueChange = {
+                        defaultVideoSpeed = it
+                        defaultVideoSpeedValue = percentage(it)
+                    },
+                    onValueChangeFinished = {
+                        Preferences.defaultVideoSpeed.set(defaultVideoSpeed)
+                    }
+                )
+
+                PreferencesDivider()
+
+                PreferencesSlide(
+                    name = stringResource(
+                        id = R.string.label_long_press_playback_speed,
                         playbackSpeedValue
                     ),
                     valueRange = Preferences.playbackSpeedRange,
@@ -218,19 +157,18 @@ class PreferencesActivity : BasicComposeActivity() {
 
                 PreferencesSlide(
                     name = stringResource(
-                        id = R.string.label_video_touch_max_range_ratio_y,
-                        videoTouchMaxRangeRatioYValue
+                        id = R.string.label_gesture_side_region_ratio,
+                        gestureSideRegionRatioValue
                     ),
-                    valueRange = Preferences.videoTouchMaxRangeRatioYRange,
-                    value = videoTouchMaxRangeRatioY,
-                    // (1.0 - 0.1) / 0.1 - 1 = 8
-                    steps = getSteps(Preferences.videoTouchMaxRangeRatioYRange, 0.01F),
+                    valueRange = Preferences.gestureSideRegionRatioRange,
+                    value = gestureSideRegionRatio,
+                    steps = getSteps(Preferences.gestureSideRegionRatioRange, 0.01F),
                     onValueChange = {
-                        videoTouchMaxRangeRatioY = it
-                        videoTouchMaxRangeRatioYValue = percentage(it)
+                        gestureSideRegionRatio = it
+                        gestureSideRegionRatioValue = percentage(it)
                     },
                     onValueChangeFinished = {
-                        Preferences.videoTouchMaxRangeRatioY.set(videoTouchMaxRangeRatioY)
+                        Preferences.gestureSideRegionRatio.set(gestureSideRegionRatio)
                     }
                 )
             }
@@ -261,22 +199,6 @@ class PreferencesActivity : BasicComposeActivity() {
                 }
                 PreferencesDivider()
                 PreferencesSwitch(
-                    name = stringResource(id = R.string.label_play_is_show_fullscreen_button),
-                    summary = stringResource(id = R.string.summary_play_is_show_fullscreen_button),
-                    isChecked = isShowFullscreenBtn
-                ) {
-                    Preferences.isShowFullscreenBtn.set(it)
-                }
-                PreferencesDivider()
-                PreferencesSwitch(
-                    name = stringResource(id = R.string.label_play_is_show_side_button),
-                    summary = stringResource(id = R.string.summary_play_is_show_side_button),
-                    isChecked = isShowSidePanelBtn
-                ) {
-                    Preferences.isShowSidePanelBtn.set(it)
-                }
-                PreferencesDivider()
-                PreferencesSwitch(
                     name = stringResource(id = R.string.label_play_is_show_drawer_button),
                     summary = stringResource(id = R.string.summary_play_is_show_drawer_button),
                     isChecked = isShowDrawerBtn
@@ -285,42 +207,23 @@ class PreferencesActivity : BasicComposeActivity() {
                 }
                 PreferencesDivider()
                 PreferencesSwitch(
-                    name = stringResource(id = R.string.label_side_panel_gesture_enable),
-                    summary = stringResource(id = R.string.summary_side_panel_gesture_enable),
-                    isChecked = isSidePanelGestureEnable
+                    name = stringResource(id = R.string.label_play_is_show_play_mode_button),
+                    summary = stringResource(id = R.string.summary_play_is_show_play_mode_button),
+                    isChecked = isShowPlayModeBtn
                 ) {
-                    Preferences.isSidePanelGestureEnable.set(it)
+                    Preferences.isShowPlayModeBtn.set(it)
                 }
-            }
-
-            PreferencesGroup {
-                PreferencesIntent(
-                    name = stringResource(id = R.string.label_archive_uri),
-                    summary = stringResource(id = R.string.summary_archive_uri)
-                ) {
-                    ArchiveUriManagerActivity.start(activity)
-                }
-
                 PreferencesDivider()
-
                 PreferencesSwitch(
-                    name = stringResource(id = R.string.label_quick_archive_enable),
-                    summary = stringResource(id = R.string.summary_quick_archive_enable),
-                    isChecked = isQuickArchiveEnable
+                    name = stringResource(id = R.string.label_play_is_show_gesture_button),
+                    summary = stringResource(id = R.string.summary_play_is_show_gesture_button),
+                    isChecked = isShowGestureBtn
                 ) {
-                    Preferences.isQuickArchiveEnable.set(it)
+                    Preferences.isShowGestureBtn.set(it)
+                    if (!it) {
+                        Preferences.isGestureControlEnabled.set(false)
+                    }
                 }
-
-                PreferencesDivider()
-
-                PreferencesSwitch(
-                    name = stringResource(id = R.string.label_show_other_quick_archive),
-                    summary = stringResource(id = R.string.summary_show_other_quick_archive),
-                    isChecked = isShowOtherQuickArchiveButton
-                ) {
-                    Preferences.isShowOtherQuickArchiveButton.set(it)
-                }
-
             }
 
             PreferencesGroup {
@@ -333,49 +236,13 @@ class PreferencesActivity : BasicComposeActivity() {
                     Preferences.isBlurVideoBackground.set(it)
                 }
 
-            }
-
-            PreferencesGroup {
-                val updateStateInfo = when (updateState) {
-                    UpdateState.Idle -> {
-                        stringResource(id = R.string.summary_check_update_idle)
-                    }
-
-                    UpdateState.Fetching -> {
-                        stringResource(id = R.string.summary_check_update_fetching)
-                    }
-
-                    UpdateState.HasUpdate -> {
-                        updateBody
-                    }
-
-                    UpdateState.NoUpdate -> {
-                        stringResource(id = R.string.summary_check_update_nothing)
-                    }
-                }
-                PreferencesIntent(
-                    name = stringResource(id = R.string.label_check_update),
-                    summary = updateStateInfo
-                ) {
-                    onUpdateButtonClick()
-                }
-
                 PreferencesDivider()
 
                 PreferencesIntent(
-                    name = stringResource(id = R.string.label_github),
-                    summary = stringResource(id = R.string.summary_github),
+                    name = stringResource(id = R.string.label_custom_video_suffix),
+                    summary = stringResource(id = R.string.summary_custom_video_suffix)
                 ) {
-                    openGitHub()
-                }
-
-                PreferencesDivider()
-
-                PreferencesIntent(
-                    name = stringResource(id = R.string.label_fallback),
-                    summary = stringResource(id = R.string.summary_fallback),
-                ) {
-                    openQQ()
+                    CustomSuffixActivity.start(activity)
                 }
             }
 
@@ -532,13 +399,6 @@ class PreferencesActivity : BasicComposeActivity() {
     private fun getSteps(range: ClosedFloatingPointRange<Float>, stepLength: Float): Int {
         // (1.0 - 0.1) / 0.1 - 1 = 8
         return ((range.endInclusive - range.start) / stepLength).toInt() - 1
-    }
-
-    private enum class UpdateState {
-        Idle,
-        Fetching,
-        HasUpdate,
-        NoUpdate
     }
 
 }

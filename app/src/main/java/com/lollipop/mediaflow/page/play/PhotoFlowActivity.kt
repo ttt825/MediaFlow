@@ -25,6 +25,10 @@ import com.lollipop.mediaflow.ui.view.RatioFrameLayout
 
 class PhotoFlowActivity : BasicFlowActivity() {
 
+    override val showPlayModeBtn = false
+
+    override val showGestureBtn = false
+
     private val recyclerView by lazy {
         RecyclerView(this)
     }
@@ -61,7 +65,6 @@ class PhotoFlowActivity : BasicFlowActivity() {
         gallery.loadChoose { gallery, success ->
             mediaData.clear()
             mediaData.addAll(gallery.fileList)
-            updateSideMediaData(mediaData)
             contentAdapter.content.notifyDataSetChanged()
             mediaFlowStoreView.resetData(mediaData)
             val currentPosition = mediaParams.currentPosition
@@ -83,10 +86,6 @@ class PhotoFlowActivity : BasicFlowActivity() {
     }
 
     private fun onItemClick(position: Int) {
-        setCurrentItem(position)
-    }
-
-    override fun onSideItemClick(mediaInfo: MediaInfo.File, position: Int) {
         setCurrentItem(position)
     }
 
@@ -148,11 +147,6 @@ class PhotoFlowActivity : BasicFlowActivity() {
     @SuppressLint("NotifyDataSetChanged")
     override fun onOrientationChanged(orientation: Orientation) {
         super.onOrientationChanged(orientation)
-        contentAdapter.content.notifyDataSetChanged()
-    }
-
-    override fun onSidePanelUpdate(isShown: Boolean) {
-        super.onSidePanelUpdate(isShown)
         contentAdapter.content.notifyDataSetChanged()
     }
 
@@ -219,6 +213,7 @@ class PhotoFlowActivity : BasicFlowActivity() {
         }
 
         private val log = registerLog()
+        private var boundUri: String = ""
 
         init {
             imageView.scaleType = ImageView.ScaleType.FIT_CENTER
@@ -232,8 +227,10 @@ class PhotoFlowActivity : BasicFlowActivity() {
         }
 
         fun bind(mediaInfo: MediaInfo.File) {
+            boundUri = mediaInfo.uriString
             MetadataLoader.load(itemView.context, mediaInfo) { metadata ->
                 log.i("bind: ${metadata?.width} * ${metadata?.height}, ${metadata?.rotation}")
+                if (boundUri != mediaInfo.uriString) return@load
                 if (metadata != null) {
                     if (metadata.needRotate) {
                         updateLayoutParams(metadata.height, metadata.width)

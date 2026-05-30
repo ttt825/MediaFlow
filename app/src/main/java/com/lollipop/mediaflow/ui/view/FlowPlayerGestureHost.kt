@@ -33,6 +33,8 @@ class FlowPlayerGestureHost @JvmOverloads constructor(
 
     var flowTouchListener: OnFlowTouchListener? = null
 
+    var shouldInterceptVerticalSwipe: ((touchDownX: Float, viewWidth: Int) -> Boolean)? = null
+
     private val penetrateViewList = mutableListOf<View>()
     private val tempViewBounds = Rect()
 
@@ -213,7 +215,14 @@ class FlowPlayerGestureHost @JvmOverloads constructor(
                 if (dx.absoluteValue > state.touchSlop * 2) {
                     touchSingleCapture()
                 } else if (dy.absoluteValue > state.touchSlop) {
-                    cancelTouch()
+                    val intercept = shouldInterceptVerticalSwipe?.invoke(
+                        state.initialX, width
+                    ) ?: false
+                    if (intercept) {
+                        touchSingleCapture()
+                    } else {
+                        cancelTouch()
+                    }
                 }
             }
 

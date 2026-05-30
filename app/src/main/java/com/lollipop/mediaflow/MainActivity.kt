@@ -1,17 +1,16 @@
 package com.lollipop.mediaflow
 
-import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
-import androidx.core.content.ContextCompat
 import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
-import androidx.lifecycle.lifecycleScope
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
 import com.lollipop.mediaflow.data.MediaDirectoryTree
@@ -22,9 +21,10 @@ import com.lollipop.mediaflow.data.MediaType
 import com.lollipop.mediaflow.data.MediaVisibility
 import com.lollipop.mediaflow.databinding.ActivityMainBinding
 import com.lollipop.mediaflow.page.main.BasicMediaGridPage
-import com.lollipop.mediaflow.page.settings.ArchiveActivity
 import com.lollipop.mediaflow.page.settings.PreferencesActivity
 import com.lollipop.mediaflow.page.settings.RootUriManagerActivity
+import com.lollipop.mediaflow.page.settings.DuplicateVideoActivity
+import com.lollipop.mediaflow.tools.MediaDeleteHelper
 import com.lollipop.mediaflow.tools.MediaIndex
 import com.lollipop.mediaflow.tools.MediaPlayLauncher
 import com.lollipop.mediaflow.tools.PrivacyLock
@@ -33,8 +33,6 @@ import com.lollipop.mediaflow.ui.BlurHelper
 import com.lollipop.mediaflow.ui.DirectoryChooseDialog
 import com.lollipop.mediaflow.ui.HomePage
 import com.lollipop.mediaflow.ui.IconPopupMenu
-import com.lollipop.mediaflow.upgrade.GithubApiModel
-import com.lollipop.mediaflow.upgrade.hasUpdate
 import kotlinx.coroutines.launch
 
 class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
@@ -43,9 +41,9 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
     companion object {
         private const val KEY_SOURCE_MANAGER = "SourceManager"
         private const val KEY_PRIVATE_KEY_MANAGER = "PrivateKeyManager"
+        private const val KEY_DUPLICATE_VIDEO_CHECK = "DuplicateVideoCheck"
         private const val KEY_DEBUG_MODE = "DebugMode"
         private const val KEY_PREFERENCES = "Preferences"
-        private const val KEY_ARCHIVE = "Archive"
     }
 
     private val binding by lazy {
@@ -72,6 +70,8 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
 
     private var currentPage = HomePage.PublicVideo
 
+    private var lastBackTime = 0L
+
     private val optionPopupHolder by lazy {
         IconPopupMenu.hold(::buildOptionMenu)
     }
@@ -86,18 +86,6 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
 
     private val dataChangedListener by lazy {
         MediaStore.createListener(this, ::onDataChanged)
-    }
-
-    private fun checkUpdate() {
-        lifecycleScope.launch {
-            val hasUpdate = GithubApiModel.fetchToday().hasUpdate()
-            val dotColor = if (hasUpdate) {
-                ContextCompat.getColor(this@MainActivity, R.color.button_slider)
-            } else {
-                ContextCompat.getColor(this@MainActivity, R.color.button_text)
-            }
-            binding.menuBtnIconDot.imageTintList = ColorStateList.valueOf(dotColor)
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -157,6 +145,23 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
             MediaStore.loadStore(this, MediaVisibility.Public),
             MediaStore.loadStore(this, MediaVisibility.Private)
         )
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val now = System.currentTimeMillis()
+                if (now - lastBackTime < 2000) {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                } else {
+                    lastBackTime = now
+                    Toast.makeText(
+                        this@MainActivity,
+                        R.string.msg_press_back_again_to_exit,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        })
     }
 
     override fun onResume() {
@@ -164,7 +169,6 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
         if (PrivacyLock.privateSetting) {
             PrivacyLock.openPrivateKeyManager(this)
         }
-        checkUpdate()
     }
 
     private fun onMenuClick(clickedView: View) {
@@ -172,7 +176,7 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
     }
 
     private fun onPlayResult(index: MediaIndex) {
-        focusPageHolder?.selectTo(index.position)
+        focusPageHolder?.selectTo(0)
     }
 
     private fun buildOptionMenu(builder: IconPopupMenu.Builder) {
@@ -180,6 +184,11 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
             .addMenu(
                 tag = KEY_SOURCE_MANAGER,
                 titleRes = R.string.source_manager,
+                iconRes = 0
+            )
+            .addMenu(
+                tag = KEY_DUPLICATE_VIDEO_CHECK,
+                titleRes = R.string.duplicate_video_check,
                 iconRes = 0
             )
             .addMenu(
@@ -193,11 +202,6 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
                 iconRes = 0
             )
             .addMenu(
-                tag = KEY_ARCHIVE,
-                titleRes = R.string.archive,
-                iconRes = 0
-            )
-            .addMenu(
                 tag = KEY_DEBUG_MODE,
                 titleRes = R.string.debug_mode,
                 iconRes = 0
@@ -206,6 +210,10 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
                 when (item.tag) {
                     KEY_PRIVATE_KEY_MANAGER -> {
                         PrivacyLock.privateVisibility
+                    }
+
+                    KEY_DUPLICATE_VIDEO_CHECK -> {
+                        PrivacyLock.privateVisibility && currentPage.visibility == MediaVisibility.Private
                     }
 
                     KEY_DEBUG_MODE -> {
@@ -226,6 +234,11 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
                         true
                     }
 
+                    KEY_DUPLICATE_VIDEO_CHECK -> {
+                        DuplicateVideoActivity.start(this)
+                        true
+                    }
+
                     KEY_PRIVATE_KEY_MANAGER -> {
                         PrivacyLock.openPrivateKeyManager(this)
                         true
@@ -236,13 +249,8 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
                         true
                     }
 
-                    KEY_ARCHIVE -> {
-                        ArchiveActivity.start(
-                            this,
-                            visibility = currentPage.visibility,
-                            type = currentPage.mediaType
-                        )
-                        true
+                    KEY_DEBUG_MODE -> {
+                        false
                     }
 
                     else -> {
@@ -252,7 +260,7 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
             }
     }
 
-    private fun openPlayPage(index: Int = 0) {
+    private fun openPlayPage(index: Int = -1) {
         playLauncher.launch(
             visibility = currentPage.visibility,
             type = currentPage.mediaType,
@@ -276,6 +284,7 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
         binding.viewPager2.setCurrentItem(index, false)
         binding.privateVideoTab.isVisible = PrivacyLock.privateVisibility
         binding.privatePhotoTab.isVisible = PrivacyLock.privateVisibility
+        focusPageHolder?.onDataChanged()
     }
 
     private fun initInsetsListener() {
@@ -319,9 +328,18 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
                     MediaSort.DateAsc -> R.drawable.clock_arrow_up_24
                     MediaSort.NameDesc -> R.drawable.text_arrow_down_24
                     MediaSort.NameAsc -> R.drawable.text_arrow_up_24
-                    MediaSort.Random -> R.drawable.shuffle_24
                 }
             )
+        }
+    }
+
+    private fun updateCountText(page: HomePage, count: Int) {
+        if (page == currentPage) {
+            val typeStr = when (page.mediaType) {
+                MediaType.Video -> getString(R.string.unit_video)
+                MediaType.Image -> getString(R.string.unit_image)
+            }
+            binding.countTextView.text = getString(R.string.format_media_count, count, typeStr)
         }
     }
 
@@ -332,6 +350,14 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
         openPlayPage(index = position)
     }
 
+    override fun onMediaItemLongClick(page: HomePage, position: Int) {
+        val gallery = getGallery(page)
+        val file = gallery.fileList.getOrNull(position) ?: return
+        MediaDeleteHelper.showDeleteConfirmDialog(this, file, gallery) {
+            focusPageHolder?.onDataChanged()
+        }
+    }
+
     override fun onLoad(
         page: HomePage,
         sort: MediaSort,
@@ -339,6 +365,7 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
     ) {
         getGallery(page).loadChoose(sort) { gallery, _ ->
             updateSortIcon()
+            updateCountText(page, gallery.fileList.size)
             callback(gallery.store.dataVersion, gallery.fileList)
         }
         updateSortIcon()
@@ -351,6 +378,7 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
     ) {
         getGallery(page).refresh(sort) { gallery, _ ->
             updateSortIcon()
+            updateCountText(page, gallery.fileList.size)
             callback(gallery.store.dataVersion, gallery.fileList)
         }
         updateSortIcon()

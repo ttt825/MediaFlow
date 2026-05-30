@@ -7,18 +7,20 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.activity.OnBackPressedCallback
 import androidx.core.view.isEmpty
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
-import com.lollipop.mediaflow.data.ArchiveQuick
 import com.lollipop.mediaflow.data.MediaInfo
 import com.lollipop.mediaflow.data.MediaStore
 import com.lollipop.mediaflow.data.MediaType
 import com.lollipop.mediaflow.data.MetadataLoader
+import com.lollipop.mediaflow.data.PlaybackMode
 import com.lollipop.mediaflow.page.flow.MediaFlowStoreView
 import com.lollipop.mediaflow.page.flow.VideoPlayHolder
-import com.lollipop.mediaflow.tools.ArchiveHelper
+import com.lollipop.mediaflow.tools.MediaDeleteHelper
 import com.lollipop.mediaflow.tools.MediaPlayLauncher
+import com.lollipop.mediaflow.tools.Preferences
 import com.lollipop.mediaflow.tools.safeRun
 import com.lollipop.mediaflow.ui.BasicFlowActivity
 import com.lollipop.mediaflow.video.VideoManager
@@ -35,7 +37,7 @@ class VideoFlowActivity : BasicFlowActivity(), VideoPlayHolder.VideoTouchDisplay
     private val videoAdapter = PlayAdapter(mediaData)
 
     private val mediaFlowStoreView by lazy {
-        MediaFlowStoreView(::onItemClick)
+        MediaFlowStoreView(::onItemClick, ::onPlaylistItemLongClick)
     }
 
     private val videoManager by lazy {
@@ -52,6 +54,16 @@ class VideoFlowActivity : BasicFlowActivity(), VideoPlayHolder.VideoTouchDisplay
         super.onCreate(savedInstanceState)
         mediaParams.onCreate(this, savedInstanceState)
         setAppearanceLightStatusBars(false)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (isDrawerOpen) {
+                    changeDrawerState(false)
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
         reloadData()
     }
 
@@ -59,8 +71,25 @@ class VideoFlowActivity : BasicFlowActivity(), VideoPlayHolder.VideoTouchDisplay
         setCurrentItem(position, false)
     }
 
-    override fun onSideItemClick(mediaInfo: MediaInfo.File, position: Int) {
-        setCurrentItem(position, false)
+    @SuppressLint("NotifyDataSetChanged")
+    private fun onPlaylistItemLongClick(position: Int) {
+        val file = mediaData.getOrNull(position) ?: return
+        MediaDeleteHelper.showDeleteConfirmDialog(this, file, gallery) {
+            videoManager.pause()
+            mediaData.removeAt(position)
+            videoAdapter.notifyDataSetChanged()
+            mediaFlowStoreView.resetData(mediaData)
+            val maxIndex = mediaData.size - 1
+            val newPosition = if (currentPosition() <= maxIndex) {
+                currentPosition()
+            } else {
+                maxIndex
+            }
+            if (newPosition >= 0) {
+                onSelected(newPosition)
+            }
+            videoManager.resetMediaList(mediaData, max(newPosition, 0))
+        }
     }
 
     private fun optRecyclerView(callback: (RecyclerView) -> Unit) {
@@ -103,19 +132,69 @@ class VideoFlowActivity : BasicFlowActivity(), VideoPlayHolder.VideoTouchDisplay
         mediaGallery.loadChoose { gallery, success ->
             mediaData.clear()
             mediaData.addAll(gallery.fileList)
-            val currentPosition = mediaParams.currentPosition
-            updateSideMediaData(mediaData)
-            videoManager.resetMediaList(gallery.fileList, currentPosition)
+            val clickedPosition = mediaParams.currentPosition
+            val clickedFile = mediaData.getOrNull(clickedPosition)
+            when (playbackMode) {
+                PlaybackMode.Sequential -> {
+                    mediaData.sortBy { it.lastModified }
+                }
+
+                PlaybackMode.Shuffle -> {
+                    mediaData.shuffle(java.util.Random(Preferences.shuffleSeed.get()))
+                }
+            }
+            val newPosition = if (clickedPosition < 0) {
+                if (mediaData.isNotEmpty()) {
+                    (0 until mediaData.size).random()
+                } else {
+                    0
+                }
+            } else if (clickedFile != null) {
+                mediaData.indexOf(clickedFile).coerceAtLeast(0)
+            } else if (mediaData.isNotEmpty()) {
+                (0 until mediaData.size).random()
+            } else {
+                0
+            }
+            videoManager.resetMediaList(mediaData, newPosition)
             videoAdapter.notifyDataSetChanged()
             mediaFlowStoreView.resetData(mediaData)
-            setCurrentItem(currentPosition, false)
-            log.i("reloadData end, isSuccess=$success, mediaCount=${mediaData.size}, index=$currentPosition")
+            mediaFlowStoreView.setSelectedPosition(newPosition)
+            setCurrentItem(newPosition, false)
+            log.i("reloadData end, isSuccess=$success, mediaCount=${mediaData.size}, index=$newPosition")
         }
+    }
+
+    @SuppressLint("NotifyDataSetChanged")
+    private fun reorderPlaylist() {
+        val currentFile = mediaData.getOrNull(currentPosition())
+        when (playbackMode) {
+            PlaybackMode.Sequential -> {
+                mediaData.sortBy { it.lastModified }
+            }
+
+            PlaybackMode.Shuffle -> {
+                val newSeed = System.currentTimeMillis()
+                Preferences.shuffleSeed.set(newSeed)
+                mediaData.shuffle(java.util.Random(newSeed))
+            }
+        }
+        val newPosition = if (currentFile != null) {
+            mediaData.indexOf(currentFile).coerceAtLeast(0)
+        } else {
+            0
+        }
+        videoAdapter.notifyDataSetChanged()
+        mediaFlowStoreView.resetData(mediaData)
+        videoManager.resetMediaList(mediaData, newPosition)
+        setCurrentItem(newPosition, false)
+        log.i("reorderPlaylist mode=$playbackMode, newPosition=$newPosition")
     }
 
     override fun onOrientationChanged(orientation: Orientation) {
         super.onOrientationChanged(orientation)
         lastHolder?.resetScaleGesture()
+        lastHolder?.updateOrientationState(isFullscreen || orientation == Orientation.LANDSCAPE)
     }
 
     private fun optCurrentHolder(callback: (VideoPlayHolder) -> Unit) {
@@ -144,9 +223,6 @@ class VideoFlowActivity : BasicFlowActivity(), VideoPlayHolder.VideoTouchDisplay
     }
 
     override fun onDrawerChanged(isOpen: Boolean) {
-        if (isOpen) {
-            videoManager.pause()
-        }
     }
 
     override fun createDrawerPanel(): View {
@@ -167,18 +243,20 @@ class VideoFlowActivity : BasicFlowActivity(), VideoPlayHolder.VideoTouchDisplay
     private fun onSelected(position: Int) {
         log.i("onSelected: $position")
         mediaParams.onSelected(this, position)
+        mediaFlowStoreView.setSelectedPosition(position)
         if (position < 0 || position >= mediaData.size) {
             updateTitle(titleValue = "", size = "", format = "", duration = "")
         } else {
             val file = mediaData[position]
-            onSideSelected(file, position)
             val job = MetadataLoader.load(this, file) {
-                updateTitle(
-                    file.name,
-                    size = it?.sizeFormat ?: "",
-                    format = file.suffix.uppercase(),
-                    duration = it?.durationFormat ?: ""
-                )
+                if (mediaData.getOrNull(position) === file) {
+                    updateTitle(
+                        file.name,
+                        size = it?.formatFileSize(file.size) ?: "",
+                        format = "",
+                        duration = it?.durationFormat ?: ""
+                    )
+                }
             }
             if (job != null) {
                 updateTitle(file.name, size = "", format = "", duration = "")
@@ -224,15 +302,10 @@ class VideoFlowActivity : BasicFlowActivity(), VideoPlayHolder.VideoTouchDisplay
         bottom: Int
     ) {
         super.onWindowInsetsChanged(left, top, right, bottom)
-        val isSideShown = isSidePanelShown()
         videoAdapter.setInsets(
             left,
             top,
-            if (isSideShown) {
-                0
-            } else {
-                right
-            },
+            right,
             bottom
         )
         mediaFlowStoreView.onInsetsChanged(left, top, right, bottom)
@@ -253,25 +326,28 @@ class VideoFlowActivity : BasicFlowActivity(), VideoPlayHolder.VideoTouchDisplay
     override fun stopSeekMode(weight: Float) {
     }
 
-    override fun onArchiveClick(position: Int, quick: ArchiveQuick) {
-        val file = mediaData[position]
-        // 最后再去移除文件，避免引用丢失
-        ArchiveHelper.remove(this, file, quick, gallery) {
-            videoManager.pause()
-            mediaData.removeAt(position)
-            removeSideAt(position)
-            videoAdapter.notifyItemRemoved(position)
-            val maxIndex = mediaData.size - 1
-            val newPosition = if (position <= maxIndex) {
-                position
-            } else {
-                maxIndex
-            }
-            if (newPosition >= 0) {
-                onSelected(newPosition)
-            }
-            videoManager.resetMediaList(mediaData, max(newPosition, 0))
-        }
+    override fun onVideoEnd(position: Int) {
+        val currentPos = currentPosition()
+        val endPosition = if (position < 0) currentPos else position
+        if (endPosition != currentPos && position >= 0) return
+
+        val nextPosition = (endPosition + 1) % mediaData.size
+        setCurrentItem(nextPosition)
+    }
+
+    override fun onPlaybackModeChanged(mode: PlaybackMode) {
+        videoManager.onPlaybackModeChanged(mode)
+        reorderPlaylist()
+    }
+
+    override fun onGestureControlChanged(enabled: Boolean) {
+        lastHolder?.setGestureControlEnabled(enabled)
+    }
+
+    override fun onFullscreenToggleClick() {
+        isFullscreen = !isFullscreen
+        updateFullscreen()
+        lastHolder?.updateOrientationState(isFullscreen || currentOrientation == Orientation.LANDSCAPE)
     }
 
     private class PlayAdapter(

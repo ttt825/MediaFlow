@@ -16,6 +16,7 @@ import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
 import androidx.media3.ui.PlayerView
 import com.lollipop.mediaflow.data.MediaInfo
+import com.lollipop.mediaflow.data.PlaybackMode
 import com.lollipop.mediaflow.tools.LLog.Companion.registerLog
 import com.lollipop.mediaflow.tools.Preferences
 
@@ -75,6 +76,8 @@ class VideoManager(
 
     private var playbackSpeed = 2F
 
+    private var defaultVideoSpeed = 1F
+
     private var currentLifecycleState: Lifecycle.State = Lifecycle.State.INITIALIZED
 
 
@@ -98,6 +101,7 @@ class VideoManager(
         videoPreload = VideoPreload(preloadBuilder.build())
         activity.lifecycle.addObserver(lifecycleObserver)
         playbackSpeed = Preferences.playbackSpeed.get()
+        defaultVideoSpeed = Preferences.defaultVideoSpeed.get()
     }
 
     private fun fetchCurrentProgress(): Long {
@@ -129,8 +133,7 @@ class VideoManager(
         val source = videoPreload.getSource(index) ?: return
         currentIndex = index
         exoPlayer.setMediaSource(source, false)
-        // 单曲循环
-        exoPlayer.repeatMode = Player.REPEAT_MODE_ONE
+        exoPlayer.repeatMode = Player.REPEAT_MODE_OFF
         // 注意：如果之前已经 prepare 过了，且播放器没出错
         // 再次调用 setMediaSource 后，播放器会自动进入准备状态
         // 只有在 IDLE 或 ERROR 状态下才需要重新 prepare()
@@ -147,6 +150,7 @@ class VideoManager(
     override fun play() {
         log.i("play")
         exoPlayer.play()
+        exoPlayer.playbackParameters = PlaybackParameters(defaultVideoSpeed)
     }
 
     override fun startPlaybackSpeed() {
@@ -155,7 +159,7 @@ class VideoManager(
     }
 
     override fun stopPlaybackSpeed() {
-        val params = PlaybackParameters(1.0f) // 2.0倍速
+        val params = PlaybackParameters(defaultVideoSpeed)
         exoPlayer.playbackParameters = params
     }
 
@@ -194,6 +198,10 @@ class VideoManager(
     override fun pause() {
         log.i("pause")
         exoPlayer.pause()
+    }
+
+    fun onPlaybackModeChanged(mode: PlaybackMode) {
+        log.i("onPlaybackModeChanged: $mode")
     }
 
     private fun onCreate() {

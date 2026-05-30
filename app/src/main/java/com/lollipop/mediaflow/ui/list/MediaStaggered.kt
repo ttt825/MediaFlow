@@ -15,6 +15,7 @@ import androidx.window.layout.WindowMetricsCalculator
 import com.bumptech.glide.Glide
 import com.lollipop.mediaflow.data.MediaInfo
 import com.lollipop.mediaflow.data.MediaMetadata
+import com.lollipop.mediaflow.data.MediaType
 import com.lollipop.mediaflow.data.MetadataLoader
 import com.lollipop.mediaflow.databinding.ItemMediaStaggeredBinding
 import com.lollipop.mediaflow.tools.Preferences
@@ -112,13 +113,15 @@ object MediaStaggered : BasicListDelegate() {
 
     open class ItemAdapter(
         data: List<MediaInfo.File>,
-        protected val onItemClick: (position: Int) -> Unit
+        protected val onItemClick: (position: Int) -> Unit,
+        protected val onItemLongClick: ((position: Int) -> Unit)? = null
     ) : BasicItemAdapter<MediaItemHolder>(data = data) {
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MediaItemHolder {
             return MediaItemHolder(
                 ItemMediaStaggeredBinding.inflate(getLayoutInflater(parent), parent, false),
-                onItemClick
+                onItemClick,
+                onItemLongClick
             )
         }
 
@@ -126,6 +129,9 @@ object MediaStaggered : BasicListDelegate() {
             holder.bind(data[position])
         }
 
+        override fun onViewRecycled(holder: MediaItemHolder) {
+            holder.onRecycled()
+        }
     }
 
     class SpaceAdapter : BasicSpaceAdapter() {
@@ -155,33 +161,53 @@ object MediaStaggered : BasicListDelegate() {
 
     open class MediaItemHolder(
         val binding: ItemMediaStaggeredBinding,
-        val onClickCallback: (position: Int) -> Unit
+        val onClickCallback: (position: Int) -> Unit,
+        val onLongClickCallback: ((position: Int) -> Unit)? = null
     ) : RecyclerView.ViewHolder(binding.root) {
 
         private var loadingJob: Job? = null
+        private var boundUri: String = ""
 
         init {
             itemView.setOnClickListener {
                 onClickCallback(bindingAdapterPosition)
             }
-        }
-
-        fun bind(mediaInfo: MediaInfo.File) {
-            loadingJob?.cancel()
-            loadingJob = MetadataLoader.load(itemView.context, mediaInfo) { metadata ->
-                if (metadata != null) {
-                    updateUI(metadata)
-                    binding.mediaPreview.post {
-                        loadCover(mediaInfo.uri)
-                    }
+            if (onLongClickCallback != null) {
+                itemView.setOnLongClickListener {
+                    onLongClickCallback.invoke(bindingAdapterPosition)
+                    true
                 }
             }
         }
 
-        private fun loadCover(uri: Uri) {
-            Glide.with(itemView)
+        fun bind(mediaInfo: MediaInfo.File) {
+            boundUri = mediaInfo.uriString
+            loadCover(mediaInfo.uri, mediaInfo.mediaType)
+            loadingJob?.cancel()
+            loadingJob = MetadataLoader.load(itemView.context, mediaInfo) { metadata ->
+                if (boundUri == mediaInfo.uriString && metadata != null) {
+                    updateUI(metadata)
+                }
+            }
+        }
+
+        fun onRecycled() {
+            boundUri = ""
+            Glide.with(itemView).clear(binding.mediaPreview)
+            loadingJob?.cancel()
+            loadingJob = null
+        }
+
+        private fun loadCover(uri: Uri, mediaType: MediaType) {
+            val request = Glide.with(itemView)
                 .load(uri)
-                .into(binding.mediaPreview)
+                .centerCrop()
+            if (mediaType == MediaType.Video) {
+                request.override(180)
+            } else {
+                request.override(300)
+            }
+            request.into(binding.mediaPreview)
         }
 
         private fun updateUI(metadata: MediaMetadata?) {

@@ -54,13 +54,13 @@
             android:theme="@style/Theme.MediaFlow" />
 
         <activity
-            android:name=".page.settings.ArchiveActivity"
+            android:name=".page.settings.CustomSuffixActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
             android:exported="false"
             android:theme="@style/Theme.MediaFlow" />
 
         <activity
-            android:name=".page.settings.ArchiveUriManagerActivity"
+            android:name=".page.settings.DuplicateVideoActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
             android:exported="false"
             android:theme="@style/Theme.MediaFlow" />
@@ -74,6 +74,23 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <activity android:name="com.lollipop.mediaflow.page.play.VideoQuickPlayActivity"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <!-- 必选：允许接收外部发来的查看请求 -->
+                <action android:name="android.intent.action.VIEW" />
+                <!-- 必选：如果不加这个，App 不会出现在“打开方式”列表中 -->
+                <category android:name="android.intent.category.DEFAULT" />
+                <!-- 允许处理文件协议和内容协议 -->
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <!-- 指定支持的 MIME 类型，视频通常使用 video/* -->
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+
 
     </application>
 

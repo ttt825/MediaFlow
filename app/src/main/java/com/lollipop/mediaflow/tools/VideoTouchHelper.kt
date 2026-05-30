@@ -6,29 +6,53 @@ import kotlin.math.absoluteValue
 import kotlin.math.min
 
 class VideoTouchHelper(
-    /**
-     * 基础权重（屏幕横移一周代表 30% 视频长度）
-     */
     private val baseWeight: Float,
-    /**
-     * 触发进度调节的横向阈值
-     */
     private val xThreshold: Float,
-    /**
-     * Y轴拉动到 1/2 屏幕高度时达到最大精度
-     */
     private val yMaxRangeRatio: Float = 0.5F,
-    /**
-     * 最精细时，速度降为 5%
-     */
     private val minWeight: Float = 0.05F,
+    private val sideRegionRatio: Float = 0.3F,
     private val videoController: VideoController
 ) : FlowPlayerGestureHost.OnFlowTouchListener {
 
+    companion object {
+        private const val SPEED_MODE_DELAY = 100L
+        private const val GESTURE_THRESHOLD = 30F
+    }
+
     private var lastX = 0F
+    private var lastY = 0F
     private var isSeeking = false
     private var accumulatedTimeWeight = 0F
     private var yRangeSize = 100F
+
+    private var isSpeedModePending = false
+    private var isSpeedModeStarted = false
+
+    private var isGestureVerticalMode = false
+    private var gestureVerticalType = GestureVerticalType.None
+
+    private val speedModeDelayTask = task {
+        onSpeedModeDelayTimeout()
+    }
+
+    var gestureControlEnabled = false
+
+    fun shouldInterceptVerticalSwipe(touchDownX: Float, viewWidth: Int): Boolean {
+        if (!gestureControlEnabled) return false
+        val ratio = touchDownX / viewWidth.toFloat()
+        return ratio < sideRegionRatio || ratio > (1F - sideRegionRatio)
+    }
+
+    private fun getGestureVerticalType(touchDownX: Float, viewWidth: Int): GestureVerticalType {
+        val ratio = touchDownX / viewWidth.toFloat()
+        return if (ratio < sideRegionRatio) {
+            GestureVerticalType.Brightness
+        } else if (ratio > (1F - sideRegionRatio)) {
+            GestureVerticalType.Volume
+        } else {
+            GestureVerticalType.None
+        }
+    }
 
     override fun onSingleCapture(
         viewWidth: Int,
@@ -39,14 +63,29 @@ class VideoTouchHelper(
         currentY: Float
     ) {
         lastX = currentX
+        lastY = currentY
         isSeeking = false
+        isSpeedModePending = true
+        isSpeedModeStarted = false
+        isGestureVerticalMode = false
+        gestureVerticalType = GestureVerticalType.None
         accumulatedTimeWeight = 0F
-        videoController.startPlaybackSpeed()
         yRangeSize = min(viewWidth, viewHeight) * yMaxRangeRatio
+        speedModeDelayTask.delayOnUI(SPEED_MODE_DELAY)
+    }
+
+    private fun onSpeedModeDelayTimeout() {
+        if (isSpeedModePending && !isSeeking && !isGestureVerticalMode) {
+            isSpeedModePending = false
+            isSpeedModeStarted = true
+            videoController.startPlaybackSpeed()
+        }
     }
 
     private fun onSwitchToSeekMode() {
-        videoController.stopPlaybackSpeed()
+        if (isSpeedModeStarted) {
+            videoController.stopPlaybackSpeed()
+        }
         videoController.startSeekMode()
     }
 
@@ -58,40 +97,51 @@ class VideoTouchHelper(
         currentX: Float,
         currentY: Float
     ) {
-        // 1. 计算当前相对于起始点的绝对位移
         val absDx = (currentX - touchDownX).absoluteValue
+        val absDy = (currentY - touchDownY).absoluteValue
 
-        // 2. 状态切换判定：如果还没进入 Seeking 且横向拉开了距离
-        if (!isSeeking && absDx > xThreshold) {
-            isSeeking = true
-            onSwitchToSeekMode() // 回调：停止倍速播放，显示进度 UI
+        if (!isSeeking && !isGestureVerticalMode) {
+            if (absDx > xThreshold) {
+                isSeeking = true
+                speedModeDelayTask.cancel()
+                isSpeedModePending = false
+                onSwitchToSeekMode()
+            } else if (gestureControlEnabled && absDy > GESTURE_THRESHOLD && absDy > absDx) {
+                val type = getGestureVerticalType(touchDownX, viewWidth)
+                if (type != GestureVerticalType.None) {
+                    isGestureVerticalMode = true
+                    gestureVerticalType = type
+                    speedModeDelayTask.cancel()
+                    isSpeedModePending = false
+                    videoController.onGestureVerticalBegin(gestureVerticalType)
+                }
+            }
         }
 
         if (isSeeking) {
-            // 3. 计算这一帧的增量 deltaX
             val deltaX = currentX - lastX
-            lastX = currentX // 锁定当前点，作为增量计算的起点
+            lastX = currentX
 
-            // 4. 【核心】基于 Y 轴位置的丝滑权重函数 (CVT 变速逻辑)
-            // 计算 Y 轴偏移占可用高度的比例 (0.0 ~ 1.0)
             val dy = (currentY - touchDownY).absoluteValue
             val ratioY = (dy / yRangeSize).coerceIn(0f, 1.0f)
-
-            // 使用插值函数平滑精度：从 1.0 (常速) 丝滑降至 minWeight (精细)
-            // 你可以根据需求换成二次函数 (ratioY * ratioY) 让感知更灵敏
             val precision = 1.0f - (1.0f - minWeight) * ratioY
 
-            // 5. 最终毫秒增量计算
-            // 增量 = (帧位移比例) * 视频总长 * 基础权重 * 当前精度
             val frameOffset = (deltaX / viewWidth.toFloat()) * baseWeight * precision
-
             accumulatedTimeWeight += frameOffset
 
-            // 6. 回调给外部，驱动 UI 上的“放大镜”效果（传入 precision 供 UI 拉伸坐标轴）
             videoController.onSeek(accumulatedTimeWeight, precision)
-        } else {
-            // 仍在“纯倍速”模式下，更新 lastX 确保切换瞬间没有突跳
+        } else if (isGestureVerticalMode) {
+            val deltaY = lastY - currentY
+            lastY = currentY
+            val deltaRatio = deltaY / viewHeight.toFloat()
+            videoController.onGestureVerticalMove(gestureVerticalType, deltaRatio)
+        }
+
+        if (!isSeeking && !isGestureVerticalMode) {
             lastX = currentX
+        }
+        if (!isGestureVerticalMode) {
+            lastY = currentY
         }
     }
 
@@ -100,12 +150,26 @@ class VideoTouchHelper(
     }
 
     override fun onTouchRelease() {
+        speedModeDelayTask.cancel()
         if (isSeeking) {
             videoController.stopSeekMode(accumulatedTimeWeight)
-        } else {
+        } else if (isSpeedModeStarted) {
             videoController.stopPlaybackSpeed()
         }
+        if (isGestureVerticalMode) {
+            videoController.onGestureVerticalEnd(gestureVerticalType)
+        }
         isSeeking = false
+        isSpeedModePending = false
+        isSpeedModeStarted = false
+        isGestureVerticalMode = false
+        gestureVerticalType = GestureVerticalType.None
+    }
+
+    enum class GestureVerticalType {
+        None,
+        Brightness,
+        Volume
     }
 
     interface VideoController {
@@ -121,6 +185,12 @@ class VideoTouchHelper(
         fun stopSeekMode(weight: Float)
 
         fun onScaleGestureChanged(matrix: Matrix)
+
+        fun onGestureVerticalBegin(type: GestureVerticalType)
+
+        fun onGestureVerticalMove(type: GestureVerticalType, deltaRatio: Float)
+
+        fun onGestureVerticalEnd(type: GestureVerticalType)
     }
 
 }

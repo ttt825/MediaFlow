@@ -9,7 +9,6 @@ sealed class MediaSort(val key: String) {
                 NameAsc.key -> NameAsc
                 DateDesc.key -> DateDesc
                 NameDesc.key -> NameDesc
-                Random.key -> Random
                 else -> null
             }
         }
@@ -38,12 +37,6 @@ sealed class MediaSort(val key: String) {
     object NameDesc : MediaSort(key = "name_desc") {
         override fun sort(fileList: ArrayList<MediaInfo.File>) {
             fileList.sortByDescending { it.name }
-        }
-    }
-
-    object Random : MediaSort(key = "random") {
-        override fun sort(fileList: ArrayList<MediaInfo.File>) {
-            fileList.shuffle()
         }
     }
 

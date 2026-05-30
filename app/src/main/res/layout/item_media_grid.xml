@@ -22,6 +22,17 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
+        <View
+            android:id="@+id/selectionBorder"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@drawable/bg_selection_border"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="@id/mediaPreview"
+            app:layout_constraintEnd_toEndOf="@id/mediaPreview"
+            app:layout_constraintStart_toStartOf="@id/mediaPreview"
+            app:layout_constraintTop_toTopOf="@id/mediaPreview" />
+
         <TextView
             android:id="@+id/durationView"
             android:layout_width="wrap_content"

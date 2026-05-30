@@ -9,20 +9,24 @@ import com.lollipop.mediaflow.data.MediaInfo
 import com.lollipop.mediaflow.ui.list.MediaGrid
 
 class MediaFlowStoreView(
-    private val onItemClick: (Int) -> Unit
+    private val onItemClick: (Int) -> Unit,
+    private val onItemLongClick: ((Int) -> Unit)? = null
 ) {
 
     private val mediaData = ArrayList<MediaInfo.File>()
 
     private var recyclerView: RecyclerView? = null
 
-    private val gridAdapterDelegate by lazy {
-        MediaGrid.buildDelegate(
-            MediaGrid.ItemAdapter(
-                data = mediaData,
-                onItemClick = onItemClick
-            )
+    private val itemAdapter by lazy {
+        MediaGrid.ItemAdapter(
+            data = mediaData,
+            onItemClick = onItemClick,
+            onItemLongClick = onItemLongClick
         )
+    }
+
+    private val gridAdapterDelegate by lazy {
+        MediaGrid.buildDelegate(itemAdapter)
     }
 
     fun getView(context: Context): View {
@@ -42,6 +46,10 @@ class MediaFlowStoreView(
         mediaData.clear()
         mediaData.addAll(data)
         gridAdapterDelegate.notifyContentDataSetChanged()
+    }
+
+    fun setSelectedPosition(position: Int) {
+        itemAdapter.setSelectedPosition(position)
     }
 
     fun onInsetsChanged(left: Int, top: Int, right: Int, bottom: Int) {

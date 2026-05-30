@@ -34,7 +34,8 @@ abstract class BasicMediaGridPage(
         MediaStaggered.buildDelegate(
             MediaStaggered.ItemAdapter(
                 data = mediaData,
-                onItemClick = ::onItemClick
+                onItemClick = ::onItemClick,
+                onItemLongClick = ::onItemLongClick
             )
         )
     }
@@ -45,7 +46,13 @@ abstract class BasicMediaGridPage(
 
     private var callback: Callback? = null
 
-    private var sortType: MediaSort = MediaSort.DateDesc
+    private var sortType: MediaSort
+        get() {
+            return page.sortType
+        }
+        set(value) {
+            page.sortType = value
+        }
 
     private val log = registerLog()
 
@@ -166,6 +173,10 @@ abstract class BasicMediaGridPage(
         callback?.onMediaItemClick(page = page, position = position)
     }
 
+    private fun onItemLongClick(position: Int) {
+        callback?.onMediaItemLongClick(page = page, position = position)
+    }
+
     private fun buildSortMenu(builder: IconPopupMenu.Builder) {
         builder.addMenu(
             tag = MediaSort.DateDesc.key,
@@ -187,11 +198,6 @@ abstract class BasicMediaGridPage(
                 titleRes = R.string.sort_text_asc,
                 iconRes = R.drawable.text_arrow_up_24
             )
-            .addMenu(
-                tag = MediaSort.Random.key,
-                titleRes = R.string.sort_random,
-                iconRes = R.drawable.shuffle_24
-            )
             .gravity(Gravity.END)
             .offsetDp(0, 8)
             .onClick {
@@ -208,6 +214,7 @@ abstract class BasicMediaGridPage(
 
     interface Callback {
         fun onMediaItemClick(page: HomePage, position: Int)
+        fun onMediaItemLongClick(page: HomePage, position: Int)
         fun onLoad(
             page: HomePage,
             sort: MediaSort,

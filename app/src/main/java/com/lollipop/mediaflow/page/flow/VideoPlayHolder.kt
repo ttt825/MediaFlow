@@ -1,6 +1,7 @@
 package com.lollipop.mediaflow.page.flow
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.PorterDuff
@@ -25,8 +26,6 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 import com.bumptech.glide.request.transition.DrawableCrossFadeFactory
 import com.lollipop.mediaflow.R
-import com.lollipop.mediaflow.data.ArchiveManager
-import com.lollipop.mediaflow.data.ArchiveQuick
 import com.lollipop.mediaflow.data.MediaInfo
 import com.lollipop.mediaflow.data.MetadataLoader
 import com.lollipop.mediaflow.databinding.PageVideoFlowBinding
@@ -41,6 +40,7 @@ import com.lollipop.mediaflow.video.VideoListener
 import com.lollipop.mediaflow.video.VideoTrackGroup
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 class VideoPlayHolder(
     private val binding: PageVideoFlowBinding
@@ -68,12 +68,24 @@ class VideoPlayHolder(
 
     private var isTouchSeekMode = false
 
+    private var seekModeStartPosition = 0L
+
+    private var immersiveSeekActive = false
+
+    private val savedButtonVisibility = mutableMapOf<Int, Int>()
+
+    private val seekButtonIds = intArrayOf(
+        R.id.subtitleButton,
+        R.id.playButton
+    )
+
     private var videoTouchHelper = VideoTouchHelper(
         baseWeight = Preferences.videoTouchSeekBaseWeight.get(),
         videoController = this,
         xThreshold = ViewConfiguration.get(itemView.context).scaledTouchSlop * 2F,
-        yMaxRangeRatio = Preferences.videoTouchMaxRangeRatioY.get(),
-        minWeight = 0.05F
+        yMaxRangeRatio = 0.5F,
+        minWeight = 0.05F,
+        sideRegionRatio = Preferences.gestureSideRegionRatio.get()
     )
 
     private var videoController: VideoController? = null
@@ -82,6 +94,17 @@ class VideoPlayHolder(
     private val sliderAnimator: DeconstructSlider.AnimationDelegate
 
     private var changeDecorationCallback: DecorationVisibilityCallback? = null
+
+    private var currentBrightness = 0.5F
+    private var currentVolumePercent = 50
+
+    private var isLandscapeVideo = false
+
+    private var isLandscapeOrientation = false
+
+    private val gestureIndicatorHideTask = task {
+        binding.gestureIndicator.isVisible = false
+    }
 
     val videoPlayerView: PlayerView
         get() {
@@ -166,6 +189,11 @@ class VideoPlayHolder(
 
         override fun onVideoEnd() {
             changeState("onVideoEnd", VideoState.Ended)
+            if (bindingAdapterPosition == RecyclerView.NO_POSITION) {
+                videoTouchDisplay?.onVideoEnd(-1)
+            } else {
+                videoTouchDisplay?.onVideoEnd(bindingAdapterPosition)
+            }
         }
 
         override fun onPlayerError(msg: String) {
@@ -200,28 +228,16 @@ class VideoPlayHolder(
         binding.playerView.setOnClickListener(clickHelper)
         sliderAnimator = DeconstructSlider.AnimationDelegate(binding.progressSlider)
         binding.progressSlider.sliderChangeListener = sliderChangeListener
-        binding.archiveFavoriteButton.setOnClickListener {
-            onArchiveClick(ArchiveQuick.Favorite)
-        }
-        binding.archiveSpecialButton.setOnClickListener {
-            onArchiveClick(ArchiveQuick.Special)
-        }
-        binding.archiveThumbUpButton.setOnClickListener {
-            onArchiveClick(ArchiveQuick.ThumpUp)
-        }
-        binding.archiveMoreButton.setOnClickListener {
-            onArchiveClick(ArchiveQuick.Other)
-        }
         binding.subtitleButton.setOnClickListener {
             showSubtitleSelectDialog()
         }
         binding.gestureHost.also {
-            it.registerPenetrate(binding.archiveFavoriteButton)
-            it.registerPenetrate(binding.archiveSpecialButton)
-            it.registerPenetrate(binding.archiveThumbUpButton)
-            it.registerPenetrate(binding.archiveMoreButton)
             it.registerPenetrate(binding.subtitleButton)
+            it.registerPenetrate(binding.fullscreenToggleButton)
             it.flowTouchListener = videoTouchHelper
+        }
+        binding.fullscreenToggleButton.setOnClickListener {
+            videoTouchDisplay?.onFullscreenToggleClick()
         }
 
         initSliderAnimation()
@@ -270,10 +286,6 @@ class VideoPlayHolder(
             }
             it.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitleWeight)
         }
-    }
-
-    private fun onArchiveClick(quick: ArchiveQuick) {
-        videoTouchDisplay?.onArchiveClick(bindingAdapterPosition, quick)
     }
 
     private fun showSubtitleSelectDialog() {
@@ -360,6 +372,38 @@ class VideoPlayHolder(
         return "${minutes}:${seconds}"
     }
 
+    private fun enterImmersiveSeek() {
+        immersiveSeekActive = true
+        isSliderTouched = true
+        savedButtonVisibility.clear()
+        for (id in seekButtonIds) {
+            val view = binding.controlLayout.findViewById<android.view.View>(id)
+            if (view != null) {
+                savedButtonVisibility[id] = view.visibility
+                view.visibility = android.view.View.GONE
+            }
+        }
+        binding.controlLayout.animate().cancel()
+        binding.controlLayout.alpha = 1F
+        binding.controlLayout.isVisible = true
+        binding.progressTextView.isVisible = true
+        updateProgressTextView(seekModeStartPosition)
+        sliderAnimator.onTouchDown()
+    }
+
+    private fun exitImmersiveSeek() {
+        sliderAnimator.onTouchUp()
+        binding.progressTextView.isVisible = false
+        binding.controlLayout.isVisible = false
+        for ((id, visibility) in savedButtonVisibility) {
+            val view = binding.controlLayout.findViewById<android.view.View>(id)
+            view?.visibility = visibility
+        }
+        savedButtonVisibility.clear()
+        isSliderTouched = false
+        immersiveSeekActive = false
+    }
+
     fun onInsetsChanged(
         left: Int,
         top: Int,
@@ -384,23 +428,51 @@ class VideoPlayHolder(
         binding.gestureHost.resetScaleGesture()
     }
 
+    fun setGestureControlEnabled(enabled: Boolean) {
+        videoTouchHelper.gestureControlEnabled = enabled
+        binding.gestureHost.shouldInterceptVerticalSwipe = if (enabled) {
+            { touchDownX, viewWidth ->
+                videoTouchHelper.shouldInterceptVerticalSwipe(touchDownX, viewWidth)
+            }
+        } else {
+            null
+        }
+    }
+
     fun onBind(media: MediaInfo.File) {
         val isMediaChanged = lastMediaFile !== media
         lastMediaFile = media
         clickHelper.reset()
         resetScaleGesture()
+        videoTouchHelper.gestureControlEnabled = Preferences.isGestureControlEnabled.get()
+        binding.gestureHost.shouldInterceptVerticalSwipe = if (videoTouchHelper.gestureControlEnabled) {
+            { touchDownX, viewWidth ->
+                videoTouchHelper.shouldInterceptVerticalSwipe(touchDownX, viewWidth)
+            }
+        } else {
+            null
+        }
         if (isMediaChanged) {
             Glide.with(itemView)
                 .load(media.uri)
+                .centerCrop()
                 .into(binding.artworkView)
             binding.artworkView.isVisible = true
             binding.playButton.isVisible = false
         }
         changeState("onBind", VideoState.Pending)
-        MetadataLoader.load(itemView.context, media) {
-            videoLength = media.metadata?.duration ?: 0
+        MetadataLoader.load(itemView.context, media) { metadata ->
+            if (lastMediaFile === media) {
+                videoLength = metadata?.duration ?: 0
+                log.i("onBind: duration = ${metadata?.duration}")
+                val w = metadata?.width ?: 0
+                val h = metadata?.height ?: 0
+                isLandscapeVideo = w > h && w > 0 && h > 0
+                if (isControlVisibility) {
+                    updateFullscreenButton()
+                }
+            }
         }
-        updateArchive()
         binding.root.post {
             updateSubtitle()
         }
@@ -412,14 +484,6 @@ class VideoPlayHolder(
                 loadBlurBackground(media.uri)
             }
         }
-    }
-
-    private fun updateArchive() {
-        binding.archiveFavoriteButton.isVisible =
-            ArchiveManager.isQuickEnable(ArchiveQuick.Favorite)
-        binding.archiveSpecialButton.isVisible = ArchiveManager.isQuickEnable(ArchiveQuick.Special)
-        binding.archiveThumbUpButton.isVisible = ArchiveManager.isQuickEnable(ArchiveQuick.ThumpUp)
-        binding.archiveMoreButton.isVisible = ArchiveManager.isQuickEnable(ArchiveQuick.Other)
     }
 
     private fun loadBlurBackground(uri: Uri) {
@@ -437,9 +501,36 @@ class VideoPlayHolder(
     }
 
     private fun updateControlVisibility(visible: Boolean) {
-        binding.controlLayout.isVisible = visible
+        binding.controlLayout.animate().cancel()
+        if (visible) {
+            binding.controlLayout.alpha = 0F
+            binding.controlLayout.isVisible = true
+            binding.controlLayout.animate()
+                .alpha(1F)
+                .setDuration(250L)
+                .start()
+        } else {
+            binding.controlLayout.animate()
+                .alpha(0F)
+                .setDuration(200L)
+                .withEndAction { binding.controlLayout.isVisible = false }
+                .start()
+        }
         changeDecorationCallback?.changeDecorationVisibility(visible)
         isControlVisibility = visible
+        updateFullscreenButton()
+    }
+
+    fun updateOrientationState(isLandscape: Boolean) {
+        isLandscapeOrientation = isLandscape
+        binding.fullscreenToggleButton.setImageResource(
+            if (isLandscape) R.drawable.fullscreen_exit_24 else R.drawable.fullscreen_24
+        )
+    }
+
+    private fun updateFullscreenButton() {
+        binding.fullscreenToggleButton.isVisible =
+            (isLandscapeOrientation || isLandscapeVideo) && isControlVisibility
     }
 
     private fun onClick(clickCount: Int) {
@@ -472,12 +563,16 @@ class VideoPlayHolder(
         }
     }
 
+    @SuppressLint("SetTextI18n")
     override fun startPlaybackSpeed() {
         videoController?.startPlaybackSpeed()
         videoTouchDisplay?.startPlaybackSpeed()
         isTouchSeekMode = true
         clickHelper.reset()
         itemView.performHapticFeedback(HapticFeedbackConstants.GESTURE_START)
+        val speed = Preferences.playbackSpeed.get()
+        binding.speedIndicator.text = "${speed}x 倍速播放"
+        binding.speedIndicator.isVisible = true
     }
 
     override fun stopPlaybackSpeed() {
@@ -486,20 +581,39 @@ class VideoPlayHolder(
         isTouchSeekMode = false
         clickHelper.reset()
         itemView.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
+        binding.speedIndicator.isVisible = false
     }
 
+    @SuppressLint("SetTextI18n")
     override fun startSeekMode() {
+        seekModeStartPosition = videoProgress
         videoController?.startSeekMode()
         videoTouchDisplay?.startSeekMode()
         isTouchSeekMode = true
         clickHelper.reset()
         itemView.performHapticFeedback(HapticFeedbackConstants.GESTURE_START)
         binding.playButton.isVisible = false
+        if (!isControlVisibility) {
+            enterImmersiveSeek()
+        } else {
+            binding.progressTextView.isVisible = true
+            updateProgressTextView(seekModeStartPosition)
+            sliderAnimator.onTouchDown()
+            isSliderTouched = true
+        }
     }
 
+    @SuppressLint("SetTextI18n")
     override fun onSeek(weight: Float, precision: Float) {
         videoController?.onTouchSeek(weight = weight, precision = precision)
         videoTouchDisplay?.onTouchSeek(weight = weight, precision = precision)
+        val duration = videoLength
+        if (duration > 0) {
+            val targetPosition = (seekModeStartPosition + (weight * duration).toLong())
+                .coerceIn(0, duration)
+            binding.progressSlider.setProgress(targetPosition * 1F / duration)
+            updateProgressTextView(targetPosition)
+        }
     }
 
     override fun stopSeekMode(weight: Float) {
@@ -508,10 +622,84 @@ class VideoPlayHolder(
         isTouchSeekMode = false
         clickHelper.reset()
         itemView.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
+        if (immersiveSeekActive) {
+            exitImmersiveSeek()
+        } else {
+            sliderAnimator.onTouchUp()
+            binding.progressTextView.isVisible = false
+            isSliderTouched = false
+        }
     }
 
     override fun onScaleGestureChanged(matrix: Matrix) {
         binding.matrixFrameLayout.updateMatrix(matrix)
+    }
+
+    override fun onGestureVerticalBegin(type: VideoTouchHelper.GestureVerticalType) {
+        when (type) {
+            VideoTouchHelper.GestureVerticalType.Brightness -> {
+                currentBrightness = try {
+                    val window = (itemView.context as? android.app.Activity)?.window
+                    val layoutParams = window?.attributes
+                    layoutParams?.screenBrightness?.let { if (it >= 0) it else 0.5F } ?: 0.5F
+                } catch (_: Exception) {
+                    0.5F
+                }
+            }
+
+            VideoTouchHelper.GestureVerticalType.Volume -> {
+                val audioManager = itemView.context.getSystemService(Context.AUDIO_SERVICE)
+                        as android.media.AudioManager
+                val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+                currentVolumePercent = if (maxVolume > 0) {
+                    (currentVolume * 100 / maxVolume)
+                } else {
+                    0
+                }
+            }
+
+            VideoTouchHelper.GestureVerticalType.None -> {}
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
+    override fun onGestureVerticalMove(type: VideoTouchHelper.GestureVerticalType, deltaRatio: Float) {
+        gestureIndicatorHideTask.cancel()
+        when (type) {
+            VideoTouchHelper.GestureVerticalType.Brightness -> {
+                currentBrightness = (currentBrightness + deltaRatio * 0.5F).coerceIn(0F, 1F)
+                try {
+                    val window = (itemView.context as? android.app.Activity)?.window
+                    val layoutParams = window?.attributes
+                    if (layoutParams != null) {
+                        layoutParams.screenBrightness = currentBrightness
+                        window.attributes = layoutParams
+                    }
+                } catch (_: Exception) {}
+                binding.gestureIndicator.text = "亮度: ${(currentBrightness * 100).roundToInt()}%"
+                binding.gestureIndicator.isVisible = true
+            }
+
+            VideoTouchHelper.GestureVerticalType.Volume -> {
+                currentVolumePercent = (currentVolumePercent + (deltaRatio * 100F).roundToInt())
+                    .coerceIn(0, 100)
+                val audioManager = itemView.context.getSystemService(Context.AUDIO_SERVICE)
+                        as android.media.AudioManager
+                val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                val targetVolume = (currentVolumePercent * maxVolume / 100F).roundToInt()
+                    .coerceIn(0, maxVolume)
+                audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, targetVolume, 0)
+                binding.gestureIndicator.text = "音量: $currentVolumePercent%"
+                binding.gestureIndicator.isVisible = true
+            }
+
+            VideoTouchHelper.GestureVerticalType.None -> {}
+        }
+    }
+
+    override fun onGestureVerticalEnd(type: VideoTouchHelper.GestureVerticalType) {
+        gestureIndicatorHideTask.delayOnUI(800)
     }
 
     enum class VideoState {
@@ -533,7 +721,9 @@ class VideoPlayHolder(
 
         fun stopSeekMode(weight: Float)
 
-        fun onArchiveClick(position: Int, quick: ArchiveQuick)
+        fun onVideoEnd(position: Int)
+
+        fun onFullscreenToggleClick()
     }
 
     interface DecorationVisibilityCallback {

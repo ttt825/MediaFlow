@@ -164,6 +164,16 @@
         </eightbitlab.com.blurview.BlurView>
     </com.lollipop.mediaflow.ui.view.RoundOutlineLayout>
 
+    <androidx.appcompat.widget.AppCompatTextView
+        android:id="@+id/countTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="36dp"
+        android:gravity="center_vertical"
+        android:textColor="@color/button_text"
+        android:textSize="14sp"
+        app:layout_constraintStart_toStartOf="@id/startGuideLine"
+        app:layout_constraintTop_toTopOf="@id/topGuideLine" />
+
     <com.lollipop.mediaflow.ui.view.RoundOutlineLayout
         android:id="@+id/menuBar"
         android:layout_width="wrap_content"

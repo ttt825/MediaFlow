@@ -31,13 +31,6 @@
 
             </eightbitlab.com.blurview.BlurTarget>
 
-            <com.lollipop.mediaflow.ui.view.SimpleGestureLayout
-                android:id="@+id/sidePanelGestureView"
-                android:layout_width="match_parent"
-                android:layout_height="0px"
-                app:layout_constraintHeight_percent="0.3"
-                app:layout_constraintTop_toTopOf="parent" />
-
             <androidx.constraintlayout.widget.ConstraintLayout
                 android:id="@+id/decorationPanel"
                 android:layout_width="match_parent"
@@ -91,22 +84,22 @@
                             android:paddingHorizontal="4dp">
 
                             <androidx.appcompat.widget.AppCompatImageView
-                                android:id="@+id/fullscreenBtn"
+                                android:id="@+id/playModeBtn"
                                 android:layout_width="42dp"
                                 android:layout_height="36dp"
                                 android:layout_gravity="center"
                                 android:padding="6dp"
-                                android:src="@drawable/fullscreen_24"
+                                android:src="@drawable/play_arrow_24"
                                 app:tint="@android:color/white"
                                 tools:tint="@android:color/black" />
 
                             <androidx.appcompat.widget.AppCompatImageView
-                                android:id="@+id/sidePanelBtn"
+                                android:id="@+id/gestureBtn"
                                 android:layout_width="42dp"
                                 android:layout_height="36dp"
                                 android:layout_gravity="center"
                                 android:padding="6dp"
-                                android:src="@drawable/right_panel_open_24"
+                                android:src="@drawable/gesture_24"
                                 app:tint="@android:color/white"
                                 tools:tint="@android:color/black" />
 
@@ -231,19 +224,6 @@
             </androidx.constraintlayout.widget.ConstraintLayout>
 
         </androidx.constraintlayout.widget.ConstraintLayout>
-
-        <com.lollipop.mediaflow.ui.view.GestureExclusionFrameLayout
-            android:id="@+id/sidePanel"
-            android:layout_width="42dp"
-            android:layout_height="match_parent"
-            android:visibility="gone"
-            tools:visibility="visible">
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/sidePanelContent"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent" />
-        </com.lollipop.mediaflow.ui.view.GestureExclusionFrameLayout>
 
     </LinearLayout>
 

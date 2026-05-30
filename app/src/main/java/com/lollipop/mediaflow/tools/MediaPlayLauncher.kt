@@ -91,16 +91,12 @@ class MediaPlayLauncher(
             return MediaVisibility.Public
         }
 
-        private fun getMediaPosition(intent: Intent?, savedState: Bundle?, def: Int = 0): Int {
+        private fun getMediaPosition(intent: Intent?, savedState: Bundle?, def: Int = -1): Int {
             savedState?.getInt(EXTRA_MEDIA_POSITION, -1)?.let {
-                if (it >= 0) {
-                    return it
-                }
+                return it
             }
             intent?.getIntExtra(EXTRA_MEDIA_POSITION, -1)?.let {
-                if (it >= 0) {
-                    return it
-                }
+                return it
             }
             return def
         }

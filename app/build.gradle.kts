@@ -19,8 +19,8 @@ android {
         applicationId = "com.lollipop.mediaflow"
         minSdk = 31
         targetSdk = 36
-        versionCode = 2_08_00
-        versionName = "2.8.0"
+        versionCode = 2_09_00
+        versionName = "2.9.0"
     }
 
     buildTypes {
@@ -40,6 +40,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("debug")
         }
         // 创建名为 beta 的新构建模式
         create("beta") {

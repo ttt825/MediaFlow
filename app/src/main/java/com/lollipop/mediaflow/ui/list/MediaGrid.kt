@@ -3,6 +3,7 @@ package com.lollipop.mediaflow.ui.list
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Space
@@ -13,6 +14,7 @@ import androidx.window.layout.WindowMetricsCalculator
 import com.bumptech.glide.Glide
 import com.lollipop.mediaflow.data.MediaInfo
 import com.lollipop.mediaflow.data.MediaMetadata
+import com.lollipop.mediaflow.data.MediaType
 import com.lollipop.mediaflow.data.MetadataLoader
 import com.lollipop.mediaflow.databinding.ItemMediaGridBinding
 import com.lollipop.mediaflow.tools.Preferences
@@ -91,20 +93,40 @@ object MediaGrid : BasicListDelegate() {
 
     open class ItemAdapter(
         data: List<MediaInfo.File>,
-        protected val onItemClick: (position: Int) -> Unit
+        protected val onItemClick: (position: Int) -> Unit,
+        protected val onItemLongClick: ((position: Int) -> Unit)? = null
     ) : BasicItemAdapter<MediaItemHolder>(data = data) {
+
+        var selectedPosition: Int = -1
+            private set
+
+        fun setSelectedPosition(position: Int) {
+            val oldPosition = selectedPosition
+            if (oldPosition == position) return
+            selectedPosition = position
+            if (oldPosition >= 0) {
+                notifyItemChanged(oldPosition)
+            }
+            if (position >= 0) {
+                notifyItemChanged(position)
+            }
+        }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MediaItemHolder {
             return MediaItemHolder(
                 ItemMediaGridBinding.inflate(getLayoutInflater(parent), parent, false),
-                onItemClick
+                onItemClick,
+                onItemLongClick
             )
         }
 
         override fun onBindViewHolder(holder: MediaItemHolder, position: Int) {
-            holder.bind(data[position])
+            holder.bind(data[position], position == selectedPosition)
         }
 
+        override fun onViewRecycled(holder: MediaItemHolder) {
+            holder.onRecycled()
+        }
     }
 
     class SpaceAdapter : BasicSpaceAdapter() {
@@ -115,27 +137,50 @@ object MediaGrid : BasicListDelegate() {
 
     open class MediaItemHolder(
         val binding: ItemMediaGridBinding,
-        val onClickCallback: (position: Int) -> Unit
+        val onClickCallback: (position: Int) -> Unit,
+        val onLongClickCallback: ((position: Int) -> Unit)? = null
     ) : RecyclerView.ViewHolder(binding.root) {
 
         private var loadingJob: Job? = null
+        private var boundUri: String = ""
 
         init {
             itemView.setOnClickListener {
                 onClickCallback(bindingAdapterPosition)
             }
+            if (onLongClickCallback != null) {
+                itemView.setOnLongClickListener {
+                    onLongClickCallback.invoke(bindingAdapterPosition)
+                    true
+                }
+            }
         }
 
-        fun bind(mediaInfo: MediaInfo.File) {
-            Glide.with(itemView)
+        fun bind(mediaInfo: MediaInfo.File, isSelected: Boolean = false) {
+            boundUri = mediaInfo.uriString
+            binding.selectionBorder.isVisible = isSelected
+            val request = Glide.with(itemView)
                 .load(mediaInfo.uri)
-                .into(binding.mediaPreview)
+                .centerCrop()
+            if (mediaInfo.mediaType == MediaType.Video) {
+                request.override(180)
+            } else {
+                request.override(200)
+            }
+            request.into(binding.mediaPreview)
             loadingJob?.cancel()
             loadingJob = MetadataLoader.load(itemView.context, mediaInfo) { metadata ->
-                if (metadata != null) {
+                if (boundUri == mediaInfo.uriString && metadata != null) {
                     updateUI(metadata)
                 }
             }
+        }
+
+        fun onRecycled() {
+            boundUri = ""
+            Glide.with(itemView).clear(binding.mediaPreview)
+            loadingJob?.cancel()
+            loadingJob = null
         }
 
         fun updateUI(metadata: MediaMetadata?) {
