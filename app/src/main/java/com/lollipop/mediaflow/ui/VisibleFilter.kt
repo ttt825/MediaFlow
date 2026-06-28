@@ -59,6 +59,18 @@ open class PreferenceVisibleFilter(
     val preference = pair(preferenceValue)
 }
 
+open class PipVisibleFilter(
+    targetView: View,
+) : PreferenceVisibleFilter(targetView) {
+
+    val isPip = pair(true)
+
+    fun onPipChanged(isPip: Boolean) {
+        this.isPip.setVisible(!isPip)
+    }
+
+}
+
 sealed class VisibleFilterGroup(val targetView: View) {
 
     protected val filters = mutableListOf<VisibleFilter>()

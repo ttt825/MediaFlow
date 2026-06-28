@@ -8,15 +8,20 @@ import android.view.ViewGroup
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
+import com.lollipop.mediaflow.data.MediaInfo
 import com.lollipop.mediaflow.data.MediaLoader
+import com.lollipop.mediaflow.data.MediaMetadata
 import com.lollipop.mediaflow.data.MetadataLoader
 import com.lollipop.mediaflow.databinding.ActivityVideoQuickPlayBinding
 import com.lollipop.mediaflow.page.flow.VideoPlayHolder
+import com.lollipop.mediaflow.tools.PIPHelper
 import com.lollipop.mediaflow.tools.Preferences
 import com.lollipop.mediaflow.ui.BlurHelper
 import com.lollipop.mediaflow.ui.CustomOrientationActivity
-import com.lollipop.mediaflow.ui.PreferenceVisibleFilter
+import com.lollipop.mediaflow.ui.PipVisibleFilter
+import com.lollipop.mediaflow.video.VideoListener
 import com.lollipop.mediaflow.video.VideoManager
+import com.lollipop.mediaflow.video.VideoTrackGroup
 import kotlinx.coroutines.launch
 
 
@@ -28,31 +33,67 @@ class VideoQuickPlayActivity : CustomOrientationActivity(), VideoPlayHolder.Vide
     }
 
     private val backBtnVisibleFilter by lazy {
-        PreferenceVisibleFilter(binding.backBtn)
+        PipVisibleFilter(binding.backBtn)
     }
 
     private val titleVisibleFilter by lazy {
-        PreferenceVisibleFilter(binding.titleView)
+        PipVisibleFilter(binding.titleView)
     }
 
     private val tagVisibleFilter by lazy {
-        PreferenceVisibleFilter(binding.tagGroup)
+        PipVisibleFilter(binding.tagGroup)
     }
 
     private val videoHolder by lazy {
         VideoPlayHolder.create(layoutInflater)
     }
 
+    private val videoListener = object : VideoListener {
+        override fun onVideoBegin() {}
+
+        override fun onVideoProgress(ms: Long) {}
+
+        override fun onPlay() {
+            onVideoPlay()
+        }
+
+        override fun onPause() {
+            onVideoPause()
+        }
+
+        override fun onVideoEnd() {}
+
+        override fun onPlayerError(msg: String) {}
+
+        override fun onTracksChanged(tracks: VideoTrackGroup) {}
+    }
+
     private val videoManager by lazy {
-        VideoManager(this)
+        VideoManager(this).also {
+            it.eventObserver.add(videoListener)
+        }
     }
 
     private var isDecorationShown = true
+    private var metadataCache: MediaMetadata? = null
+
+    private val pipActionAdapter = PIPHelper.registerPipActions(this) { action ->
+        when (action) {
+            PIPHelper.Action.PLAY -> videoManager.play()
+            PIPHelper.Action.PAUSE -> videoManager.pause()
+            PIPHelper.Action.PREVIOUS -> {
+            }
+
+            PIPHelper.Action.NEXT -> {
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(binding.root)
+        pipActionAdapter
         initInsetsListener()
         binding.backBtn.setOnClickListener {
             onBackPressedDispatcher.onBackPressed()
@@ -70,6 +111,21 @@ class VideoQuickPlayActivity : CustomOrientationActivity(), VideoPlayHolder.Vide
         }
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: android.content.res.Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        backBtnVisibleFilter.onPipChanged(isInPictureInPictureMode)
+        titleVisibleFilter.onPipChanged(isInPictureInPictureMode)
+        tagVisibleFilter.onPipChanged(isInPictureInPictureMode)
+        videoHolder.onPipChanged(isInPictureInPictureMode)
+    }
+
     private fun loadVideo(videoUri: Uri) {
         val act = this
         lifecycleScope.launch {
@@ -84,13 +140,35 @@ class VideoQuickPlayActivity : CustomOrientationActivity(), VideoPlayHolder.Vide
                         format = "",
                         duration = metadata?.durationFormat ?: ""
                     )
+                    metadataCache = metadata
+                    updatePipParams()
                 }
                 videoManager.resetMediaList(listOf(mediaFile))
                 videoHolder.onBind(mediaFile)
                 videoHolder.onSelected(isDecorationShown)
                 videoManager.play(0)
+                videoHolder.onPipChanged(isInPictureInPictureMode)
             }
         }
+    }
+
+    private fun onVideoPlay() {
+        updatePipParams()
+    }
+
+    private fun onVideoPause() {
+        updatePipParams()
+    }
+
+    private fun updatePipParams() {
+        val isPlaying = videoManager.isPlaying()
+        val pipOption = PIPHelper.Option(
+            hasPrev = false,
+            hasNext = false,
+            hasPlay = !isPlaying,
+            hasPause = isPlaying
+        )
+        PIPHelper.setParams(this, metadataCache, pipOption)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -108,6 +186,10 @@ class VideoQuickPlayActivity : CustomOrientationActivity(), VideoPlayHolder.Vide
 
     private fun changeDecoration(isVisibility: Boolean) {
         isDecorationShown = isVisibility
+        applyDecorationVisibility(isVisibility)
+    }
+
+    private fun applyDecorationVisibility(isVisibility: Boolean) {
         titleVisibleFilter.base.setVisible(isVisibility)
         tagVisibleFilter.base.setVisible(isVisibility)
         backBtnVisibleFilter.base.setVisible(isVisibility)
@@ -200,5 +282,12 @@ class VideoQuickPlayActivity : CustomOrientationActivity(), VideoPlayHolder.Vide
     }
 
     override fun onFullscreenToggleClick() {
+    }
+
+    override fun onEnterPipMode() {
+        if (!PIPHelper.isSupported(this) || PIPHelper.isInPictureInPictureMode(this)) {
+            return
+        }
+        enterPictureInPictureMode()
     }
 }

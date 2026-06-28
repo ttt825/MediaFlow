@@ -33,6 +33,7 @@
             android:name=".page.play.VideoFlowActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
             android:exported="false"
+            android:supportsPictureInPicture="true"
             android:theme="@style/Theme.MediaFlow" />
 
         <activity
@@ -77,7 +78,8 @@
 
         <activity android:name="com.lollipop.mediaflow.page.play.VideoQuickPlayActivity"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:supportsPictureInPicture="true">
             <intent-filter>
                 <!-- 必选：允许接收外部发来的查看请求 -->
                 <action android:name="android.intent.action.VIEW" />

@@ -176,7 +176,10 @@ class MainActivity : BasicInsetsActivity(), BasicMediaGridPage.Callback,
     }
 
     private fun onPlayResult(index: MediaIndex) {
-        focusPageHolder?.selectTo(0)
+        // 返回时保持原点击位置，而非回到顶部
+        if (index.position >= 0) {
+            focusPageHolder?.selectTo(index.position)
+        }
     }
 
     private fun buildOptionMenu(builder: IconPopupMenu.Builder) {

@@ -7,12 +7,14 @@ import android.view.ViewGroup
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.CallSuper
 import androidx.core.graphics.Insets
+import androidx.core.view.isEmpty
 import androidx.core.view.isVisible
 import androidx.drawerlayout.widget.DrawerLayout
 import com.lollipop.mediaflow.R
 import com.lollipop.mediaflow.data.PlaybackMode
 import com.lollipop.mediaflow.databinding.ActivityFlowBinding
 import com.lollipop.mediaflow.tools.Preferences
+import com.lollipop.mediaflow.ui.PipVisibleFilter
 
 abstract class BasicFlowActivity : CustomOrientationActivity() {
 
@@ -32,7 +34,7 @@ abstract class BasicFlowActivity : CustomOrientationActivity() {
     protected open val showGestureBtn = true
 
     private val backBtnVisibleFilter by lazy {
-        PreferenceVisibleFilter(basicBinding.backBtn)
+        PipVisibleFilter(basicBinding.backBtn)
     }
 
     protected val menuBarVisibleFilter by lazy {
@@ -40,19 +42,19 @@ abstract class BasicFlowActivity : CustomOrientationActivity() {
     }
 
     private val menuBtnVisibleFilter by lazy {
-        PreferenceVisibleFilter(basicBinding.menuBtn).also {
+        PipVisibleFilter(basicBinding.menuBtn).also {
             menuBarVisibleFilter.register(it)
         }
     }
 
     private val playModeBtnVisibleFilter by lazy {
-        PreferenceVisibleFilter(basicBinding.playModeBtn).also {
+        PipVisibleFilter(basicBinding.playModeBtn).also {
             menuBarVisibleFilter.register(it)
         }
     }
 
     private val gestureBtnVisibleFilter by lazy {
-        PreferenceVisibleFilter(basicBinding.gestureBtn).also {
+        PipVisibleFilter(basicBinding.gestureBtn).also {
             menuBarVisibleFilter.register(it)
         }
     }
@@ -64,11 +66,11 @@ abstract class BasicFlowActivity : CustomOrientationActivity() {
         private set
 
     private val titleVisibleFilter by lazy {
-        PreferenceVisibleFilter(basicBinding.titleView)
+        PipVisibleFilter(basicBinding.titleView)
     }
 
     private val tagVisibleFilter by lazy {
-        PreferenceVisibleFilter(basicBinding.tagGroup)
+        PipVisibleFilter(basicBinding.tagGroup)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -179,6 +181,14 @@ abstract class BasicFlowActivity : CustomOrientationActivity() {
 
     protected fun changeDecoration(isVisibility: Boolean) {
         isDecorationShown = isVisibility
+        applyDecorationVisibility(isVisibility)
+    }
+
+    /**
+     * 仅应用装饰层可见性，不修改 [isDecorationShown] 状态。
+     * 用于画中画等需要临时隐藏/恢复装饰层的场景。
+     */
+    protected fun applyDecorationVisibility(isVisibility: Boolean) {
         basicBinding.decorationPanel.animate().cancel()
         if (isVisibility) {
             basicBinding.decorationPanel.alpha = 0F
@@ -253,6 +263,19 @@ abstract class BasicFlowActivity : CustomOrientationActivity() {
         super.onConfigurationChanged(newConfig)
         updateBlur()
         updateFullscreen()
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        backBtnVisibleFilter.onPipChanged(isInPictureInPictureMode)
+        titleVisibleFilter.onPipChanged(isInPictureInPictureMode)
+        tagVisibleFilter.onPipChanged(isInPictureInPictureMode)
+        menuBtnVisibleFilter.onPipChanged(isInPictureInPictureMode)
+        playModeBtnVisibleFilter.onPipChanged(isInPictureInPictureMode)
+        gestureBtnVisibleFilter.onPipChanged(isInPictureInPictureMode)
     }
 
     private fun updateBlur() {

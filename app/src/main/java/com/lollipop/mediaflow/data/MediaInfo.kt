@@ -166,6 +166,8 @@ sealed class MediaInfo(
 
         var metadata: MediaMetadata? = null
 
+        var videoProgressCache: Long = 0L
+
         val suffix: String by lazy {
             name.substringAfterLast('.', "")
         }

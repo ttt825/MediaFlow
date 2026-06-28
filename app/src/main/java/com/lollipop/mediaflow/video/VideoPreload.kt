@@ -63,11 +63,15 @@ class VideoPreload(
             preloadSet.add(media)
         }
         // 最后，移除所有不在活动范围内的预加载项
-        tempSet.forEach {
-            preloadManager.remove(it)
+        for (item in tempSet) {
+            try {
+                preloadManager.remove(item)
+            } catch (e: Throwable) {
+                log.e("removePreload", e)
+            }
+            preloadSet.remove(item)
         }
-        // 最后，更新预加载集合，移除所有不在活动范围内的项
-        preloadSet.removeAll(tempSet)
+        // 已在上方逐个移除，无需再次调用 removeAll
 
         // 最后，更新当前播放索引
         preloadManager.setCurrentPlayingIndex(index)

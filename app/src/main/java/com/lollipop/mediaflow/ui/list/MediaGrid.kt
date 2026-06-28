@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.window.layout.WindowMetricsCalculator
 import com.bumptech.glide.Glide
+import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.lollipop.mediaflow.data.MediaInfo
 import com.lollipop.mediaflow.data.MediaMetadata
 import com.lollipop.mediaflow.data.MediaType
@@ -164,8 +165,10 @@ object MediaGrid : BasicListDelegate() {
                 .centerCrop()
             if (mediaInfo.mediaType == MediaType.Video) {
                 request.override(180)
+                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
             } else {
                 request.override(200)
+                    .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
             }
             request.into(binding.mediaPreview)
             loadingJob?.cancel()

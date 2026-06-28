@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
 import androidx.core.content.edit
 import com.lollipop.mediaflow.R
 import com.lollipop.mediaflow.page.settings.PrivateKeySettingActivity
@@ -18,6 +20,18 @@ object PrivacyLock {
     const val PRIVATE_KEY_LENGTH = 4
 
     const val PRIVATE_KEY_MASK = 1000
+
+    /**
+     * 触发隐私模式后，输入正确口令的倒计时时长（毫秒）
+     * 仅在倒计时结束前输入正确口令方可进入隐私模式
+     */
+    const val COUNTDOWN_DURATION = 5000L
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val countdownRunnable = Runnable {
+        onCountdownEnd()
+    }
 
     private var lockState = true
 
@@ -93,6 +107,7 @@ object PrivacyLock {
     fun setClosePrivate(context: Context) {
         privateSetting = false
         target = 0
+        cancelCountdown()
         getPreferences(context).edit {
             putBoolean(KEY_PRIVATE_SETTING, false)
             putInt(KEY_TARGET, 0)
@@ -106,6 +121,7 @@ object PrivacyLock {
     fun skipSetting() {
         privateSetting = false
         target = 0
+        cancelCountdown()
     }
 
     /**
@@ -122,6 +138,7 @@ object PrivacyLock {
             }
             this.privateSetting = false
             this.target = target
+            cancelCountdown()
             log.i("setKey.target=$target")
         } catch (e: Exception) {
             log.e("setKey", e)
@@ -135,13 +152,35 @@ object PrivacyLock {
         }
         // 锁定的情况下，才需要判断，否则就直接返回 false
         if (lockState) {
+            // 首次输入触发隐私模式，启动 5 秒倒计时
+            if (currentWindow == 0) {
+                startCountdown()
+            }
             // 保持 window 只有 4 位：先丢掉最高位，再塞入新数字
             currentWindow = (currentWindow % PRIVATE_KEY_MASK) * 10 + digit.key
             if (currentWindow == target) {
-                // 密码正确，解锁
+                // 密码正确，解锁并取消倒计时
+                cancelCountdown()
                 lockState = false
             }
         }
+    }
+
+    /**
+     * 启动 5 秒倒计时：倒计时结束前未输入正确口令则重置输入，保持当前界面状态。
+     */
+    private fun startCountdown() {
+        mainHandler.removeCallbacks(countdownRunnable)
+        mainHandler.postDelayed(countdownRunnable, COUNTDOWN_DURATION)
+    }
+
+    private fun cancelCountdown() {
+        mainHandler.removeCallbacks(countdownRunnable)
+    }
+
+    private fun onCountdownEnd() {
+        // 5 秒内未完成正确输入，重置当前输入窗口，保持锁定状态（当前界面状态不变）
+        currentWindow = 0
     }
 
     fun openPrivateKeyManager(context: Context) {

@@ -1,5 +1,9 @@
 package com.lollipop.mediaflow.page.flow
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
@@ -12,8 +16,10 @@ import android.net.Uri
 import android.util.TypedValue
 import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.core.view.isVisible
@@ -31,9 +37,11 @@ import com.lollipop.mediaflow.data.MetadataLoader
 import com.lollipop.mediaflow.databinding.PageVideoFlowBinding
 import com.lollipop.mediaflow.tools.ClickHelper
 import com.lollipop.mediaflow.tools.LLog.Companion.registerLog
+import com.lollipop.mediaflow.tools.PIPHelper
 import com.lollipop.mediaflow.tools.Preferences
 import com.lollipop.mediaflow.tools.VideoTouchHelper
 import com.lollipop.mediaflow.tools.task
+import com.lollipop.mediaflow.ui.PipVisibleFilter
 import com.lollipop.mediaflow.ui.view.DeconstructSlider
 import com.lollipop.mediaflow.video.VideoController
 import com.lollipop.mediaflow.video.VideoListener
@@ -47,6 +55,12 @@ class VideoPlayHolder(
 ) : RecyclerView.ViewHolder(binding.root), VideoTouchHelper.VideoController {
 
     companion object {
+        /** 非沉浸模式下无交互自动隐藏控件的延时（毫秒） */
+        private const val AUTO_HIDE_DELAY = 15_000L
+
+        /** 随机模式下模糊背景的淡入时长（毫秒） */
+        private const val RANDOM_BACKGROUND_FADE_DURATION = 300L
+
         fun create(layoutInflater: LayoutInflater, parent: ViewGroup? = null): VideoPlayHolder {
             return VideoPlayHolder(
                 if (parent == null) {
@@ -63,7 +77,8 @@ class VideoPlayHolder(
     private val clickHelper = ClickHelper(onClick = ::onClick)
 
     private var videoLength: Long = 0
-    private var videoProgress: Long = 0
+    var videoProgress: Long = 0
+        private set
     private var videoState = VideoState.Pending
 
     private var isTouchSeekMode = false
@@ -106,6 +121,10 @@ class VideoPlayHolder(
         binding.gestureIndicator.isVisible = false
     }
 
+    private val autoHideControlsTask = task {
+        autoHideControls()
+    }
+
     val videoPlayerView: PlayerView
         get() {
             return binding.playerView
@@ -116,7 +135,13 @@ class VideoPlayHolder(
     private var lastChangeTime = 0L
     private var isSliderTouched = false
 
+    private val controllerVisibleFilter = PipVisibleFilter(binding.controlLayout)
+    private val pipButtonVisibleFilter = PipVisibleFilter(binding.pipButton)
+    private val fullscreenButtonVisibleFilter = PipVisibleFilter(binding.fullscreenToggleButton)
+
     private var lastMediaFile: MediaInfo.File? = null
+
+    private var backgroundFadeAnimator: Animator? = null
 
     private val sliderChangeListener = object : DeconstructSlider.SliderChangeListener {
         override fun onTouchDown() {
@@ -127,14 +152,21 @@ class VideoPlayHolder(
             lastChangeTime = now()
             updateProgressTextView(currentTime)
             sliderAnimator.onTouchDown()
+            scheduleAutoHide()
         }
 
         override fun onTouchUp() {
-            binding.progressTextView.isVisible = false
             seekTo((binding.progressSlider.progress * videoLength).toLong())
             lastChangeTime = now()
             isSliderTouched = false
             sliderAnimator.onTouchUp()
+            // 非沉浸显示模式下保持视频时间信息可见
+            if (isControlVisibility) {
+                updateProgressTextView(videoProgress)
+            } else {
+                binding.progressTextView.isVisible = false
+            }
+            scheduleAutoHide()
         }
 
         override fun onProgressChanged(progress: Float, fromUser: Boolean) {
@@ -145,6 +177,7 @@ class VideoPlayHolder(
                     val currentTime = (videoLength * progress).toLong()
                     seekTo(currentTime)
                     updateProgressTextView(currentTime)
+                    scheduleAutoHide()
                 }
             }
         }
@@ -175,7 +208,7 @@ class VideoPlayHolder(
         }
 
         override fun onPlay() {
-            binding.playButton.isVisible = false
+            animatePlayButtonToPauseAndHide()
             changeState("onPlay", VideoState.Playing)
         }
 
@@ -183,7 +216,9 @@ class VideoPlayHolder(
             log.i("onPause")
             if (videoState != VideoState.Pending) {
                 changeState("onPause", VideoState.Paused)
-                binding.playButton.isVisible = !isTouchSeekMode
+                if (!isTouchSeekMode) {
+                    showPlayButton()
+                }
             }
         }
 
@@ -234,11 +269,22 @@ class VideoPlayHolder(
         binding.gestureHost.also {
             it.registerPenetrate(binding.subtitleButton)
             it.registerPenetrate(binding.fullscreenToggleButton)
+            it.registerPenetrate(binding.pipButton)
+            it.registerPenetrate(binding.playButton)
             it.flowTouchListener = videoTouchHelper
         }
         binding.fullscreenToggleButton.setOnClickListener {
             videoTouchDisplay?.onFullscreenToggleClick()
         }
+        binding.pipButton.setOnClickListener {
+            videoTouchDisplay?.onEnterPipMode()
+        }
+        binding.playButton.setOnClickListener {
+            togglePlayPause()
+        }
+        pipButtonVisibleFilter.preference.setVisible(
+            Preferences.isShowPipBtn.get() && PIPHelper.isSupported(itemView.context)
+        )
 
         initSliderAnimation()
         initVideoBackground()
@@ -340,7 +386,7 @@ class VideoPlayHolder(
 
     fun onSelected(isDecorationShown: Boolean) {
         videoProgress = 0
-        seekTo(0)
+        // 不在这里 seekTo(0)，进度由 VideoManager.play() 统一管理，避免多余的操作
         updateControlVisibility(isDecorationShown)
     }
 
@@ -360,6 +406,8 @@ class VideoPlayHolder(
             if (!isSliderTouched) {
                 binding.progressSlider.setProgress(videoProgress * 1F / videoLength)
             }
+            // 非沉浸显示模式下持续刷新视频时间信息
+            updateProgressTextView(videoProgress)
         }
     }
 
@@ -417,11 +465,19 @@ class VideoPlayHolder(
         controller: VideoController?,
         touchDisplay: VideoTouchDisplay?,
         decorationCallback: DecorationVisibilityCallback?,
+        showArtwork: Boolean = true,
     ) {
         this.videoController = controller
         this.videoTouchDisplay = touchDisplay
         this.changeDecorationCallback = decorationCallback
-        binding.artworkView.isVisible = videoController == null
+        binding.artworkView.isVisible = videoController == null && showArtwork
+        // 获得焦点时，如果模糊背景被隐藏（随机模式无缝切换），执行淡入
+        if (controller != null) {
+            fadeInVideoBackground()
+        } else {
+            // 失去焦点时取消自动隐藏计时，避免对非当前项触发隐藏
+            cancelAutoHide()
+        }
     }
 
     fun resetScaleGesture() {
@@ -455,7 +511,7 @@ class VideoPlayHolder(
         if (isMediaChanged) {
             Glide.with(itemView)
                 .load(media.uri)
-                .centerCrop()
+                .fitCenter()
                 .into(binding.artworkView)
             binding.artworkView.isVisible = true
             binding.playButton.isVisible = false
@@ -468,9 +524,7 @@ class VideoPlayHolder(
                 val w = metadata?.width ?: 0
                 val h = metadata?.height ?: 0
                 isLandscapeVideo = w > h && w > 0 && h > 0
-                if (isControlVisibility) {
-                    updateFullscreenButton()
-                }
+                updateFullscreenButton()
             }
         }
         binding.root.post {
@@ -479,46 +533,154 @@ class VideoPlayHolder(
         if (isMediaChanged) {
             // 确保每次重新绑定都是干净的
             binding.videoBackground.setImageDrawable(null)
+            binding.videoBackground.alpha = 1F
+            cancelBackgroundFade()
             binding.subtitleButton.isVisible = false
             if (Preferences.isBlurVideoBackground.get()) {
-                loadBlurBackground(media.uri)
+                loadBlurBackground(media.uri, crossFade = true)
             }
         }
     }
 
-    private fun loadBlurBackground(uri: Uri) {
-        Glide.with(itemView)
+    /**
+     * 无缝重绑定：用于随机模式切换时把当前 holder 的数据换成正在播放的视频，
+     * 但不重新显示全屏预览图，避免画面闪烁。
+     */
+    fun onBindSeamless(media: MediaInfo.File) {
+        lastMediaFile = media
+        clickHelper.reset()
+        resetScaleGesture()
+        videoTouchHelper.gestureControlEnabled = Preferences.isGestureControlEnabled.get()
+        binding.gestureHost.shouldInterceptVerticalSwipe = if (videoTouchHelper.gestureControlEnabled) {
+            { touchDownX, viewWidth ->
+                videoTouchHelper.shouldInterceptVerticalSwipe(touchDownX, viewWidth)
+            }
+        } else {
+            null
+        }
+        // 保持全屏预览图隐藏，防止切换时闪现
+        binding.artworkView.isVisible = false
+        MetadataLoader.load(itemView.context, media) { metadata ->
+            if (lastMediaFile === media) {
+                videoLength = metadata?.duration ?: 0
+                log.i("onBindSeamless: duration = ${metadata?.duration}")
+                val w = metadata?.width ?: 0
+                val h = metadata?.height ?: 0
+                isLandscapeVideo = w > h && w > 0 && h > 0
+                updateFullscreenButton()
+            }
+        }
+        binding.root.post {
+            updateSubtitle()
+        }
+        binding.subtitleButton.isVisible = false
+        if (Preferences.isBlurVideoBackground.get()) {
+            // 随机模式无缝切换时，模糊背景先隐藏，等获得焦点后再淡入
+            binding.videoBackground.alpha = 0F
+            cancelBackgroundFade()
+            loadBlurBackground(media.uri, crossFade = false)
+        }
+    }
+
+    private fun loadBlurBackground(uri: Uri, crossFade: Boolean = true) {
+        val request = Glide.with(itemView)
             .load(uri)
             .override(20)
-            .transition(
+        if (crossFade) {
+            request.transition(
                 DrawableTransitionOptions.withCrossFade(
                     DrawableCrossFadeFactory.Builder(1000) // 设置时长为 1s
                         .setCrossFadeEnabled(true) // 关键：开启真正的交叉淡入淡出，防止闪烁
                         .build()
                 )
             )
-            .into(binding.videoBackground)
+        }
+        request.into(binding.videoBackground)
+    }
+
+    private fun cancelBackgroundFade() {
+        backgroundFadeAnimator?.cancel()
+        backgroundFadeAnimator = null
+    }
+
+    private fun fadeInVideoBackground(duration: Long = RANDOM_BACKGROUND_FADE_DURATION) {
+        if (binding.videoBackground.alpha >= 1F) {
+            return
+        }
+        cancelBackgroundFade()
+        binding.videoBackground.apply {
+            alpha = 0F
+            isVisible = true
+        }
+        backgroundFadeAnimator = ObjectAnimator.ofFloat(
+            binding.videoBackground,
+            View.ALPHA,
+            0F,
+            1F
+        ).apply {
+            this.duration = duration
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    backgroundFadeAnimator = null
+                }
+            })
+            start()
+        }
     }
 
     private fun updateControlVisibility(visible: Boolean) {
-        binding.controlLayout.animate().cancel()
+        isControlVisibility = visible
+        controllerVisibleFilter.base.setVisible(visible)
+        pipButtonVisibleFilter.base.setVisible(visible)
+        updateFullscreenButton()
+        // 非沉浸显示模式下显示视频时间信息（当前播放时间 / 总时长）
+        binding.progressTextView.isVisible = visible
         if (visible) {
-            binding.controlLayout.alpha = 0F
-            binding.controlLayout.isVisible = true
-            binding.controlLayout.animate()
-                .alpha(1F)
-                .setDuration(250L)
-                .start()
-        } else {
-            binding.controlLayout.animate()
-                .alpha(0F)
-                .setDuration(200L)
-                .withEndAction { binding.controlLayout.isVisible = false }
-                .start()
+            updateProgressTextView(videoProgress)
         }
         changeDecorationCallback?.changeDecorationVisibility(visible)
-        isControlVisibility = visible
-        updateFullscreenButton()
+        // 非沉浸模式下开启无交互自动隐藏倒计时，沉浸模式下取消
+        if (visible) {
+            scheduleAutoHide()
+        } else {
+            cancelAutoHide()
+        }
+    }
+
+    /**
+     * 重新计时非沉浸模式下的无交互自动隐藏倒计时。
+     * 仅在非沉浸显示模式且未处于手势 seek 中时生效。
+     */
+    private fun scheduleAutoHide() {
+        autoHideControlsTask.cancel()
+        if (isControlVisibility && !isTouchSeekMode) {
+            autoHideControlsTask.delayOnUI(AUTO_HIDE_DELAY)
+        }
+    }
+
+    private fun cancelAutoHide() {
+        autoHideControlsTask.cancel()
+    }
+
+    private fun autoHideControls() {
+        // 连续 AUTO_HIDE_DELAY 毫秒无任何交互，自动切换至沉浸模式
+        if (isControlVisibility && !isTouchSeekMode && !isSliderTouched) {
+            updateControlVisibility(false)
+        } else if (isControlVisibility) {
+            // 处于交互态（如手势 seek 中），重新计时
+            scheduleAutoHide()
+        }
+    }
+
+    fun onPipChanged(isInPictureInPictureMode: Boolean) {
+        controllerVisibleFilter.onPipChanged(isInPictureInPictureMode)
+        pipButtonVisibleFilter.onPipChanged(isInPictureInPictureMode)
+        fullscreenButtonVisibleFilter.onPipChanged(isInPictureInPictureMode)
+        if (isInPictureInPictureMode) {
+            delayHideArtworkTask.cancel()
+            binding.artworkView.isVisible = false
+            cancelAutoHide()
+        }
     }
 
     fun updateOrientationState(isLandscape: Boolean) {
@@ -529,8 +691,59 @@ class VideoPlayHolder(
     }
 
     private fun updateFullscreenButton() {
-        binding.fullscreenToggleButton.isVisible =
-            (isLandscapeOrientation || isLandscapeVideo) && isControlVisibility
+        fullscreenButtonVisibleFilter.base.setVisible(isControlVisibility)
+    }
+
+    private fun togglePlayPause() {
+        if (videoState == VideoState.Pending) {
+            return
+        }
+        scheduleAutoHide()
+        val isPlaying = videoController?.isPlaying() ?: false
+        if (isPlaying) {
+            videoController?.pause()
+        } else if (videoState == VideoState.Paused || videoState == VideoState.Ready) {
+            videoController?.play()
+        }
+    }
+
+    private var playButtonAnimator: Animator? = null
+
+    private fun showPlayButton() {
+        playButtonAnimator?.cancel()
+        binding.playButton.apply {
+            setImageResource(R.drawable.play_circle_24px)
+            scaleX = 1f
+            scaleY = 1f
+            alpha = 1f
+            isVisible = true
+        }
+    }
+
+    private fun animatePlayButtonToPauseAndHide() {
+        if (!binding.playButton.isVisible) {
+            return
+        }
+        playButtonAnimator?.cancel()
+        binding.playButton.setImageResource(R.drawable.pause_circle_24px)
+        val scaleX = ObjectAnimator.ofFloat(binding.playButton, "scaleX", 1f, 1.5f)
+        val scaleY = ObjectAnimator.ofFloat(binding.playButton, "scaleY", 1f, 1.5f)
+        val alpha = ObjectAnimator.ofFloat(binding.playButton, "alpha", 1f, 0f)
+        AnimatorSet().apply {
+            playTogether(scaleX, scaleY, alpha)
+            duration = 300
+            interpolator = AccelerateDecelerateInterpolator()
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    binding.playButton.isVisible = false
+                    binding.playButton.scaleX = 1f
+                    binding.playButton.scaleY = 1f
+                    binding.playButton.alpha = 1f
+                }
+            })
+            playButtonAnimator = this
+            start()
+        }
     }
 
     private fun onClick(clickCount: Int) {
@@ -538,6 +751,8 @@ class VideoPlayHolder(
             log.i("onClick isTouchSeekMode = true, break")
             return
         }
+        // 任意点击交互均重置自动隐藏倒计时
+        scheduleAutoHide()
         when (clickCount) {
             1 -> {
                 // 点击一次
@@ -582,6 +797,7 @@ class VideoPlayHolder(
         clickHelper.reset()
         itemView.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
         binding.speedIndicator.isVisible = false
+        scheduleAutoHide()
     }
 
     @SuppressLint("SetTextI18n")
@@ -601,6 +817,8 @@ class VideoPlayHolder(
             sliderAnimator.onTouchDown()
             isSliderTouched = true
         }
+        // 进入手势 seek 时取消自动隐藏计时，避免拖拽过程中隐藏控件
+        cancelAutoHide()
     }
 
     @SuppressLint("SetTextI18n")
@@ -626,16 +844,24 @@ class VideoPlayHolder(
             exitImmersiveSeek()
         } else {
             sliderAnimator.onTouchUp()
-            binding.progressTextView.isVisible = false
             isSliderTouched = false
+            // 非沉浸显示模式下保持视频时间信息可见
+            if (isControlVisibility) {
+                updateProgressTextView(videoProgress)
+            } else {
+                binding.progressTextView.isVisible = false
+            }
         }
+        scheduleAutoHide()
     }
 
     override fun onScaleGestureChanged(matrix: Matrix) {
         binding.matrixFrameLayout.updateMatrix(matrix)
+        scheduleAutoHide()
     }
 
     override fun onGestureVerticalBegin(type: VideoTouchHelper.GestureVerticalType) {
+        scheduleAutoHide()
         when (type) {
             VideoTouchHelper.GestureVerticalType.Brightness -> {
                 currentBrightness = try {
@@ -666,6 +892,7 @@ class VideoPlayHolder(
     @SuppressLint("SetTextI18n")
     override fun onGestureVerticalMove(type: VideoTouchHelper.GestureVerticalType, deltaRatio: Float) {
         gestureIndicatorHideTask.cancel()
+        scheduleAutoHide()
         when (type) {
             VideoTouchHelper.GestureVerticalType.Brightness -> {
                 currentBrightness = (currentBrightness + deltaRatio * 0.5F).coerceIn(0F, 1F)
@@ -700,6 +927,7 @@ class VideoPlayHolder(
 
     override fun onGestureVerticalEnd(type: VideoTouchHelper.GestureVerticalType) {
         gestureIndicatorHideTask.delayOnUI(800)
+        scheduleAutoHide()
     }
 
     enum class VideoState {
@@ -724,6 +952,8 @@ class VideoPlayHolder(
         fun onVideoEnd(position: Int)
 
         fun onFullscreenToggleClick()
+
+        fun onEnterPipMode()
     }
 
     interface DecorationVisibilityCallback {

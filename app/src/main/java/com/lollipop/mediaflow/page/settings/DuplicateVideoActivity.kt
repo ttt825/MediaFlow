@@ -65,12 +65,13 @@ import com.lollipop.mediaflow.data.MediaStore
 import com.lollipop.mediaflow.data.MediaType
 import com.lollipop.mediaflow.data.MediaVisibility
 import com.lollipop.mediaflow.data.RootUri
+import com.lollipop.mediaflow.data.duplicate.DuplicateGroup
+import com.lollipop.mediaflow.data.duplicate.VideoDuplicateDetector
 import com.lollipop.mediaflow.tools.LLog.Companion.registerLog
 import com.lollipop.mediaflow.tools.doAsync
 import com.lollipop.mediaflow.tools.onUI
 import com.lollipop.mediaflow.ui.BasicComposeActivity
 import com.lollipop.mediaflow.ui.theme.currentThemeColor
-import java.io.File
 
 class DuplicateVideoActivity : BasicComposeActivity() {
 
@@ -89,6 +90,8 @@ class DuplicateVideoActivity : BasicComposeActivity() {
     private val duplicateGroups = SnapshotStateList<DuplicateGroup>()
 
     private var isScanning by mutableStateOf(false)
+
+    private var scanProgress by mutableStateOf("")
 
     private val rootUriList = SnapshotStateList<RootUri>()
 
@@ -132,6 +135,7 @@ class DuplicateVideoActivity : BasicComposeActivity() {
 
     private fun findDuplicates(fileList: List<MediaInfo.File>) {
         isScanning = true
+        scanProgress = ""
         duplicateGroups.clear()
         doAsync(
             error = {
@@ -139,6 +143,7 @@ class DuplicateVideoActivity : BasicComposeActivity() {
                 onUI { isScanning = false }
             }
         ) {
+            // 确保所有视频的基础元数据已就绪
             for (file in fileList) {
                 if (file.metadata == null) {
                     MediaLoader.loadMediaMetadataSync(
@@ -155,116 +160,38 @@ class DuplicateVideoActivity : BasicComposeActivity() {
                 fileList
             }
 
-            val groups = if (selectedRootUriString != null) {
-                findDuplicatesByDuration(filtered)
-            } else {
-                val byName = findDuplicatesByName(filtered)
-                val byDuration = findDuplicatesByDuration(filtered)
-                mergeDuplicateGroups(byName, byDuration)
-            }
+            val detector = VideoDuplicateDetector(
+                context = this@DuplicateVideoActivity,
+                database = MediaLoader.getMediaDatabase(this@DuplicateVideoActivity),
+                onProgress = { current, total, stage ->
+                    onUI {
+                        scanProgress = when (stage) {
+                            VideoDuplicateDetector.Stage.EXTRACTING_SIGNATURES ->
+                                getString(
+                                    R.string.duplicate_progress_extract,
+                                    current,
+                                    total
+                                )
+                            VideoDuplicateDetector.Stage.COMPARING ->
+                                getString(
+                                    R.string.duplicate_progress_compare,
+                                    current,
+                                    total
+                                )
+                            VideoDuplicateDetector.Stage.FINISHED -> ""
+                        }
+                    }
+                }
+            )
+            val groups = detector.findDuplicates(filtered)
 
             onUI {
                 isScanning = false
+                scanProgress = ""
                 duplicateGroups.clear()
                 duplicateGroups.addAll(groups)
             }
         }
-    }
-
-    private fun mergeDuplicateGroups(
-        byName: List<DuplicateGroup>,
-        byDuration: List<DuplicateGroup>
-    ): List<DuplicateGroup> {
-        val seen = mutableSetOf<String>()
-        val result = mutableListOf<DuplicateGroup>()
-        var index = 1
-        for (group in byName) {
-            val key = group.files.map { it.uriString }.sorted().joinToString("|")
-            if (seen.add(key)) {
-                result.add(DuplicateGroup(index++, group.files))
-            }
-        }
-        for (group in byDuration) {
-            val key = group.files.map { it.uriString }.sorted().joinToString("|")
-            if (seen.add(key)) {
-                result.add(DuplicateGroup(index++, group.files))
-            }
-        }
-        return result
-    }
-
-    private fun findDuplicatesByName(fileList: List<MediaInfo.File>): List<DuplicateGroup> {
-        val nameMap = mutableMapOf<String, MutableList<MediaInfo.File>>()
-        for (file in fileList) {
-            val nameWithoutExt = File(file.name).nameWithoutExtension.lowercase()
-            nameMap.getOrPut(nameWithoutExt) { mutableListOf() }.add(file)
-        }
-        return nameMap.values
-            .filter { it.size > 1 }
-            .mapIndexed { index, files -> DuplicateGroup(index + 1, files) }
-    }
-
-    private fun findDuplicatesByDuration(fileList: List<MediaInfo.File>): List<DuplicateGroup> {
-        val durationMap = mutableMapOf<Long, MutableList<MediaInfo.File>>()
-        for (file in fileList) {
-            val duration = file.metadata?.duration ?: 0
-            if (duration > 0) {
-                val bucket = duration / 1000
-                durationMap.getOrPut(bucket) { mutableListOf() }.add(file)
-            }
-        }
-        val result = mutableListOf<DuplicateGroup>()
-        var index = 1
-        for ((_, files) in durationMap) {
-            if (files.size < 2) continue
-            val nameGroups = mutableMapOf<String, MutableList<MediaInfo.File>>()
-            for (file in files) {
-                val nameWithoutExt = File(file.name).nameWithoutExtension.lowercase()
-                val matched = nameGroups.entries.any { (key, group) ->
-                    if (isSimilarName(key, nameWithoutExt)) {
-                        group.add(file)
-                        true
-                    } else {
-                        false
-                    }
-                }
-                if (!matched) {
-                    nameGroups[nameWithoutExt] = mutableListOf(file)
-                }
-            }
-            for (group in nameGroups.values) {
-                if (group.size >= 2) {
-                    result.add(DuplicateGroup(index++, group))
-                }
-            }
-        }
-        return result
-    }
-
-    private fun isSimilarName(name1: String, name2: String): Boolean {
-        if (name1 == name2) return true
-        if (name1.contains(name2) || name2.contains(name1)) return true
-        val maxLen = maxOf(name1.length, name2.length)
-        if (maxLen == 0) return true
-        val distance = levenshteinDistance(name1, name2)
-        return distance.toFloat() / maxLen < 0.3F
-    }
-
-    private fun levenshteinDistance(s1: String, s2: String): Int {
-        val dp = Array(s1.length + 1) { IntArray(s2.length + 1) }
-        for (i in 0..s1.length) dp[i][0] = i
-        for (j in 0..s2.length) dp[0][j] = j
-        for (i in 1..s1.length) {
-            for (j in 1..s2.length) {
-                val cost = if (s1[i - 1] == s2[j - 1]) 0 else 1
-                dp[i][j] = minOf(
-                    dp[i - 1][j] + 1,
-                    dp[i][j - 1] + 1,
-                    dp[i - 1][j - 1] + cost
-                )
-            }
-        }
-        return dp[s1.length][s2.length]
     }
 
     private fun deleteFile(file: MediaInfo.File) {
@@ -461,6 +388,14 @@ class DuplicateVideoActivity : BasicComposeActivity() {
                                     text = stringResource(R.string.duplicate_scanning),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
+                                if (scanProgress.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = scanProgress,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7F),
+                                        fontSize = 12.sp
+                                    )
+                                }
                             }
                         }
                     } else if (groups.isEmpty()) {
@@ -613,8 +548,4 @@ class DuplicateVideoActivity : BasicComposeActivity() {
         }
     }
 
-    class DuplicateGroup(
-        val index: Int,
-        val files: MutableList<MediaInfo.File>
-    )
 }

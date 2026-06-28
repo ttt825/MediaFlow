@@ -30,6 +30,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,8 +43,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.lollipop.mediaflow.R
 import com.lollipop.mediaflow.data.MediaVisibility
 import com.lollipop.mediaflow.ui.theme.MediaFlowTheme
@@ -70,6 +76,7 @@ abstract class BasicComposeActivity : ComponentActivity() {
         modifier: Modifier = Modifier.fillMaxSize(),
         innerPadding: PaddingValues,
         showBack: Boolean = true,
+        title: String? = null,
         content: LazyListScope.() -> Unit
     ) {
         val layoutDirection = LocalLayoutDirection.current
@@ -88,8 +95,26 @@ abstract class BasicComposeActivity : ComponentActivity() {
                 item {
                     Spacer(modifier = Modifier.height(innerPadding.calculateTopPadding()))
                 }
-                item {
-                    Spacer(modifier = Modifier.height(64.dp))
+                if (title == null) {
+                    item {
+                        Spacer(modifier = Modifier.height(64.dp))
+                    }
+                } else {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(64.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = title,
+                                fontSize = 20.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
                 }
                 content()
                 item {
@@ -114,7 +139,7 @@ abstract class BasicComposeActivity : ComponentActivity() {
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = null,
+                            contentDescription = stringResource(id = R.string.cd_back),
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)

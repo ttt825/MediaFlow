@@ -3,6 +3,7 @@ package com.lollipop.mediaflow.page.settings
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
@@ -21,10 +23,11 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -32,12 +35,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lollipop.mediaflow.BuildConfig
 import com.lollipop.mediaflow.R
-import com.lollipop.mediaflow.tools.LLog.Companion.registerLog
 import com.lollipop.mediaflow.tools.Preferences
 import com.lollipop.mediaflow.ui.BasicComposeActivity
 import com.lollipop.mediaflow.ui.theme.currentThemeColor
@@ -59,10 +64,6 @@ class PreferencesActivity : BasicComposeActivity() {
         return "${(float * 100).toInt()}%"
     }
 
-    private val log by lazy {
-        registerLog()
-    }
-
     @Composable
     override fun Content(innerPadding: PaddingValues) {
         val activity = this
@@ -71,104 +72,80 @@ class PreferencesActivity : BasicComposeActivity() {
         var videoTouchSeekBaseWeight by remember { mutableFloatStateOf(Preferences.videoTouchSeekBaseWeight.get()) }
         var gestureSideRegionRatio by remember { mutableFloatStateOf(Preferences.gestureSideRegionRatio.get()) }
         val isBlurVideoBackground by remember { Preferences.isBlurVideoBackground.state }
-        var playbackSpeedValue by remember { mutableStateOf(percentage(playbackSpeed)) }
-        var defaultVideoSpeedValue by remember { mutableStateOf(percentage(defaultVideoSpeed)) }
-        var videoTouchSeekBaseWeightValue by remember {
-            mutableStateOf(
-                percentage(
-                    videoTouchSeekBaseWeight
-                )
-            )
-        }
-        var gestureSideRegionRatioValue by remember {
-            mutableStateOf(percentage(gestureSideRegionRatio))
-        }
         val isShowDrawerBtn by remember { Preferences.isShowDrawerBtn.state }
         val isShowPlayModeBtn by remember { Preferences.isShowPlayModeBtn.state }
         val isShowGestureBtn by remember { Preferences.isShowGestureBtn.state }
+        val isShowPipBtn by remember { Preferences.isShowPipBtn.state }
         val isShowBackBtn by remember { Preferences.isShowBackBtn.state }
         val isShowTitle by remember { Preferences.isShowTitle.state }
         val isShowTag by remember { Preferences.isShowTag.state }
+        val isPictureInPictureEnable by remember { Preferences.isPictureInPictureEnable.state }
+        val isPipPrevEnable by remember { Preferences.isPipPrevEnable.state }
+        val isPipPlayEnable by remember { Preferences.isPipPlayEnable.state }
+        val isPipNextEnable by remember { Preferences.isPipNextEnable.state }
 
         ContentColumn(
             innerPadding = innerPadding,
-            showBack = true
+            showBack = true,
+            title = "偏好设置"
         ) {
 
             PreferencesGroup {
                 PreferencesSlide(
-                    name = stringResource(
-                        id = R.string.label_default_video_speed,
-                        defaultVideoSpeedValue
-                    ),
                     valueRange = Preferences.playbackSpeedRange,
                     value = defaultVideoSpeed,
                     steps = getSteps(Preferences.playbackSpeedRange, 0.01F),
-                    onValueChange = {
-                        defaultVideoSpeed = it
-                        defaultVideoSpeedValue = percentage(it)
+                    nameProvider = {
+                        stringResource(id = R.string.label_default_video_speed, percentage(it))
                     },
                     onValueChangeFinished = {
-                        Preferences.defaultVideoSpeed.set(defaultVideoSpeed)
+                        defaultVideoSpeed = it
+                        Preferences.defaultVideoSpeed.set(it)
                     }
                 )
 
                 PreferencesDivider()
 
                 PreferencesSlide(
-                    name = stringResource(
-                        id = R.string.label_long_press_playback_speed,
-                        playbackSpeedValue
-                    ),
                     valueRange = Preferences.playbackSpeedRange,
                     value = playbackSpeed,
-                    // (4.0 - 0.5) / 0.1 - 1 = 34
                     steps = getSteps(Preferences.playbackSpeedRange, 0.01F),
-                    onValueChange = {
-                        playbackSpeed = it
-                        playbackSpeedValue = percentage(it)
+                    nameProvider = {
+                        stringResource(id = R.string.label_long_press_playback_speed, percentage(it))
                     },
                     onValueChangeFinished = {
-                        Preferences.playbackSpeed.set(playbackSpeed)
+                        playbackSpeed = it
+                        Preferences.playbackSpeed.set(it)
                     }
                 )
 
                 PreferencesDivider()
 
                 PreferencesSlide(
-                    name = stringResource(
-                        id = R.string.label_video_touch_seek_base_weight,
-                        videoTouchSeekBaseWeightValue
-                    ),
                     valueRange = Preferences.videoTouchSeekBaseWeightRange,
                     value = videoTouchSeekBaseWeight,
-                    // (1.2 - 0.3) / 0.1 - 1 = 8
                     steps = getSteps(Preferences.videoTouchSeekBaseWeightRange, 0.01F),
-                    onValueChange = {
-                        videoTouchSeekBaseWeight = it
-                        videoTouchSeekBaseWeightValue = percentage(it)
+                    nameProvider = {
+                        stringResource(id = R.string.label_video_touch_seek_base_weight, percentage(it))
                     },
                     onValueChangeFinished = {
-                        Preferences.videoTouchSeekBaseWeight.set(videoTouchSeekBaseWeight)
+                        videoTouchSeekBaseWeight = it
+                        Preferences.videoTouchSeekBaseWeight.set(it)
                     }
                 )
 
                 PreferencesDivider()
 
                 PreferencesSlide(
-                    name = stringResource(
-                        id = R.string.label_gesture_side_region_ratio,
-                        gestureSideRegionRatioValue
-                    ),
                     valueRange = Preferences.gestureSideRegionRatioRange,
                     value = gestureSideRegionRatio,
                     steps = getSteps(Preferences.gestureSideRegionRatioRange, 0.01F),
-                    onValueChange = {
-                        gestureSideRegionRatio = it
-                        gestureSideRegionRatioValue = percentage(it)
+                    nameProvider = {
+                        stringResource(id = R.string.label_gesture_side_region_ratio, percentage(it))
                     },
                     onValueChangeFinished = {
-                        Preferences.gestureSideRegionRatio.set(gestureSideRegionRatio)
+                        gestureSideRegionRatio = it
+                        Preferences.gestureSideRegionRatio.set(it)
                     }
                 )
             }
@@ -227,6 +204,60 @@ class PreferencesActivity : BasicComposeActivity() {
             }
 
             PreferencesGroup {
+                PreferencesSwitch(
+                    name = stringResource(id = R.string.label_picture_in_picture_enable),
+                    summary = stringResource(id = R.string.summary_picture_in_picture_enable),
+                    isChecked = isPictureInPictureEnable
+                ) {
+                    Preferences.isPictureInPictureEnable.set(it)
+                }
+
+                AnimatedVisibility(visible = isPictureInPictureEnable) {
+                    Column {
+                        PreferencesDivider()
+
+                        PreferencesSwitch(
+                            name = stringResource(id = R.string.label_play_is_show_pip_button),
+                            summary = stringResource(id = R.string.summary_play_is_show_pip_button),
+                            isChecked = isShowPipBtn
+                        ) {
+                            Preferences.isShowPipBtn.set(it)
+                        }
+
+                        PreferencesDivider()
+
+                        PreferencesSwitch(
+                            name = stringResource(id = R.string.label_pip_button_skip_previous_enable),
+                            summary = stringResource(id = R.string.summary_pip_button_skip_previous_enable),
+                            isChecked = isPipPrevEnable
+                        ) {
+                            Preferences.isPipPrevEnable.set(it)
+                        }
+
+                        PreferencesDivider()
+
+                        PreferencesSwitch(
+                            name = stringResource(id = R.string.label_pip_button_play_enable),
+                            summary = stringResource(id = R.string.summary_pip_button_play_enable),
+                            isChecked = isPipPlayEnable
+                        ) {
+                            Preferences.isPipPlayEnable.set(it)
+                        }
+
+                        PreferencesDivider()
+
+                        PreferencesSwitch(
+                            name = stringResource(id = R.string.label_pip_button_skip_next_enable),
+                            summary = stringResource(id = R.string.summary_pip_button_skip_next_enable),
+                            isChecked = isPipNextEnable
+                        ) {
+                            Preferences.isPipNextEnable.set(it)
+                        }
+                    }
+                }
+            }
+
+            PreferencesGroup {
 
                 PreferencesSwitch(
                     name = stringResource(id = R.string.label_video_blur),
@@ -249,7 +280,7 @@ class PreferencesActivity : BasicComposeActivity() {
             item {
                 Text(
                     text = BuildConfig.VERSION_NAME,
-                    color = currentThemeColor().buttonText,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -295,6 +326,11 @@ class PreferencesActivity : BasicComposeActivity() {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .toggleable(
+                    value = isChecked,
+                    onValueChange = onCheckedChange,
+                    role = Role.Switch
+                )
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -304,13 +340,13 @@ class PreferencesActivity : BasicComposeActivity() {
             ) {
                 Text(
                     text = name,
-                    color = currentThemeColor().buttonText,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth(),
                     fontSize = 16.sp
                 )
                 Text(
                     text = summary,
-                    color = currentThemeColor().buttonText,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth(),
                     fontSize = 12.sp
                 )
@@ -318,7 +354,10 @@ class PreferencesActivity : BasicComposeActivity() {
 
             Switch(
                 checked = isChecked,
-                onCheckedChange = onCheckedChange,
+                onCheckedChange = null,
+                modifier = Modifier.semantics {
+                    contentDescription = name
+                }
             )
         }
     }
@@ -333,6 +372,7 @@ class PreferencesActivity : BasicComposeActivity() {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick)
+                .minimumInteractiveComponentSize()
                 .padding(horizontal = 12.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -342,50 +382,60 @@ class PreferencesActivity : BasicComposeActivity() {
             ) {
                 Text(
                     text = name,
-                    color = currentThemeColor().buttonText,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth(),
                     fontSize = 16.sp
                 )
                 Text(
                     text = summary,
-                    color = currentThemeColor().buttonText,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth(),
                     fontSize = 12.sp
                 )
             }
             Icon(
                 imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-                contentDescription = null
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 
     @Composable
     private fun ColumnScope.PreferencesSlide(
-        name: String,
         valueRange: ClosedFloatingPointRange<Float>,
         steps: Int,
         value: Float,
-        onValueChange: (value: Float) -> Unit,
-        onValueChangeFinished: () -> Unit
+        nameProvider: @Composable (value: Float) -> String,
+        onValueChangeFinished: (value: Float) -> Unit
     ) {
+        var localValue by remember { mutableFloatStateOf(value) }
+        LaunchedEffect(value) { localValue = value }
+        val name = nameProvider(localValue)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .minimumInteractiveComponentSize()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Text(
                 text = name,
-                color = currentThemeColor().buttonText,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 16.sp
             )
             Slider(
-                modifier = Modifier.fillMaxWidth(),
-                value = value,
-                onValueChange = onValueChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        contentDescription = name
+                    },
+                value = localValue,
+                onValueChange = { localValue = it },
                 valueRange = valueRange,
                 steps = steps,
-                onValueChangeFinished = onValueChangeFinished,
+                onValueChangeFinished = {
+                    onValueChangeFinished(localValue)
+                },
                 colors = SliderDefaults.colors(
                     activeTickColor = Color.Transparent,
                     inactiveTickColor = Color.Transparent,
@@ -397,7 +447,6 @@ class PreferencesActivity : BasicComposeActivity() {
     }
 
     private fun getSteps(range: ClosedFloatingPointRange<Float>, stepLength: Float): Int {
-        // (1.0 - 0.1) / 0.1 - 1 = 8
         return ((range.endInclusive - range.start) / stepLength).toInt() - 1
     }
 

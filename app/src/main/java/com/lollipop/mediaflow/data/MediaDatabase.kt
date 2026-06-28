@@ -7,14 +7,15 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.provider.DocumentsContract
 import androidx.core.database.sqlite.transaction
 import androidx.core.net.toUri
+import com.lollipop.mediaflow.data.duplicate.VideoSignature
 import com.lollipop.mediaflow.tools.CursorColumn
 import com.lollipop.mediaflow.tools.LLog.Companion.registerLog
+import com.lollipop.mediaflow.tools.Preferences
 import com.lollipop.mediaflow.tools.optInt
 import com.lollipop.mediaflow.tools.optLong
 import com.lollipop.mediaflow.tools.optString
 import com.lollipop.mediaflow.tools.put
-
-class MediaDatabase(context: Context) : SQLiteOpenHelper(context, "Media.db", null, 4) {
+class MediaDatabase(context: Context) : SQLiteOpenHelper(context, "Media.db", null, 5) {
 
     private val log = registerLog()
 
@@ -43,6 +44,7 @@ class MediaDatabase(context: Context) : SQLiteOpenHelper(context, "Media.db", nu
         db?.execSQL(LocalCacheTable.CREATE_TABLE_PUBLIC)
         db?.execSQL(SubtitleCacheTable.CREATE_TABLE_PRIVATE)
         db?.execSQL(SubtitleCacheTable.CREATE_TABLE_PUBLIC)
+        db?.execSQL(VideoSignatureTable.CREATE_TABLE)
     }
 
     fun fillingMetadataCache() {
@@ -129,6 +131,65 @@ class MediaDatabase(context: Context) : SQLiteOpenHelper(context, "Media.db", nu
         } catch (e: Exception) {
             log.e("updateMediaMetadata", e)
         }
+    }
+
+    fun findVideoSignature(docId: String): VideoSignature? {
+        try {
+            readableDatabase.query(
+                VideoSignatureTable.TABLE_NAME,
+                VideoSignatureTable.ALL_COLUMNS,
+                "${VideoSignatureTable.COLUMN_DOC_ID} = ?",
+                arrayOf(docId),
+                null,
+                null,
+                null
+            ).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    return VideoSignature(
+                        docId = cursor.optString(VideoSignatureColumn.DocId),
+                        lastModified = cursor.optLong(VideoSignatureColumn.LastModified),
+                        durationMs = cursor.optLong(VideoSignatureColumn.Duration),
+                        width = cursor.optInt(VideoSignatureColumn.Width),
+                        height = cursor.optInt(VideoSignatureColumn.Height),
+                        frameHashes = parseFrameHashes(cursor.optString(VideoSignatureColumn.FrameHashes)),
+                        version = cursor.optInt(VideoSignatureColumn.Version)
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            log.e("findVideoSignature", e)
+        }
+        return null
+    }
+
+    fun updateVideoSignature(signature: VideoSignature) {
+        try {
+            writableDatabase.insertWithOnConflict(
+                VideoSignatureTable.TABLE_NAME,
+                null,
+                ContentValues().apply {
+                    put(VideoSignatureColumn.DocId.key, signature.docId)
+                    put(VideoSignatureColumn.LastModified.key, signature.lastModified)
+                    put(VideoSignatureColumn.Duration.key, signature.durationMs)
+                    put(VideoSignatureColumn.Width.key, signature.width)
+                    put(VideoSignatureColumn.Height.key, signature.height)
+                    put(VideoSignatureColumn.FrameHashes.key, formatFrameHashes(signature.frameHashes))
+                    put(VideoSignatureColumn.Version.key, signature.version)
+                },
+                SQLiteDatabase.CONFLICT_REPLACE
+            )
+        } catch (e: Exception) {
+            log.e("updateVideoSignature", e)
+        }
+    }
+
+    private fun parseFrameHashes(value: String): LongArray {
+        if (value.isBlank()) return LongArray(0)
+        return value.split(',').mapNotNull { it.toLongOrNull() }.toLongArray()
+    }
+
+    private fun formatFrameHashes(hashes: LongArray): String {
+        return hashes.joinToString(",") { it.toString() }
     }
 
     fun loadRootUri(visibility: MediaVisibility): List<RootUri> {
@@ -597,6 +658,52 @@ class MediaDatabase(context: Context) : SQLiteOpenHelper(context, "Media.db", nu
         RootUri(SubtitleCacheTable.COLUMN_ROOT_URI),
         ModeId(SubtitleCacheTable.COLUMN_MODE_ID),
         VideoId(SubtitleCacheTable.COLUMN_VIDEO_ID)
+    }
+
+    object VideoSignatureTable {
+        const val TABLE_NAME = "VideoSignature"
+
+        const val COLUMN_DOC_ID = "doc_id"
+        const val COLUMN_LAST_MODIFIED = "last_modified"
+        const val COLUMN_DURATION = "duration"
+        const val COLUMN_WIDTH = "width"
+        const val COLUMN_HEIGHT = "height"
+        const val COLUMN_FRAME_HASHES = "frame_hashes"
+        const val COLUMN_VERSION = "version"
+
+        val ALL_COLUMNS = arrayOf(
+            COLUMN_DOC_ID,
+            COLUMN_LAST_MODIFIED,
+            COLUMN_DURATION,
+            COLUMN_WIDTH,
+            COLUMN_HEIGHT,
+            COLUMN_FRAME_HASHES,
+            COLUMN_VERSION
+        )
+
+        const val CREATE_TABLE = """
+            CREATE TABLE IF NOT EXISTS $TABLE_NAME (
+                $COLUMN_DOC_ID TEXT PRIMARY KEY NOT NULL,
+                $COLUMN_LAST_MODIFIED INTEGER NOT NULL,
+                $COLUMN_DURATION INTEGER NOT NULL,
+                $COLUMN_WIDTH INTEGER NOT NULL,
+                $COLUMN_HEIGHT INTEGER NOT NULL,
+                $COLUMN_FRAME_HASHES TEXT NOT NULL,
+                $COLUMN_VERSION INTEGER NOT NULL
+            )
+        """
+    }
+
+    enum class VideoSignatureColumn(
+        override val key: String
+    ) : CursorColumn {
+        DocId(VideoSignatureTable.COLUMN_DOC_ID),
+        LastModified(VideoSignatureTable.COLUMN_LAST_MODIFIED),
+        Duration(VideoSignatureTable.COLUMN_DURATION),
+        Width(VideoSignatureTable.COLUMN_WIDTH),
+        Height(VideoSignatureTable.COLUMN_HEIGHT),
+        FrameHashes(VideoSignatureTable.COLUMN_FRAME_HASHES),
+        Version(VideoSignatureTable.COLUMN_VERSION)
     }
 
 

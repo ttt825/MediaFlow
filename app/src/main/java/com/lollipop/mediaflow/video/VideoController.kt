@@ -22,4 +22,8 @@ interface VideoController {
 
      fun selectTrack(track: VideoTrack?)
 
+     fun previous()
+
+     fun next()
+
 }

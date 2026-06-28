@@ -53,7 +53,7 @@ object Preferences {
      * 默认视频播放速度
      */
     val defaultVideoSpeed by lazy {
-        FloatItem(name = "defaultVideoSpeed", 1F)
+        FloatItem(name = "defaultVideoSpeed", 1.25F)
     }
 
     /**
@@ -67,7 +67,7 @@ object Preferences {
      * 手势操作区域（亮度/音量）屏幕占比
      */
     val gestureSideRegionRatio by lazy {
-        FloatItem(name = "gestureSideRegionRatio", 0.3F)
+        FloatItem(name = "gestureSideRegionRatio", 0.2F)
     }
 
     /**
@@ -89,11 +89,43 @@ object Preferences {
     }
 
     val isShowGestureBtn by lazy {
-        BooleanItem(name = "isShowGestureBtn", false)
+        BooleanItem(name = "isShowGestureBtn", true)
+    }
+
+    val isShowPipBtn by lazy {
+        BooleanItem(name = "isShowPipBtn", true)
+    }
+
+    /**
+     * 是否开启画中画模式
+     */
+    val isPictureInPictureEnable by lazy {
+        BooleanItem(name = "isPictureInPictureEnable", true)
+    }
+
+    /**
+     * 画中画模式下是否开启上一曲按钮
+     */
+    val isPipPrevEnable by lazy {
+        BooleanItem(name = "isPipPrevEnable", true)
+    }
+
+    /**
+     * 画中画模式下是否开启下一曲按钮
+     */
+    val isPipNextEnable by lazy {
+        BooleanItem(name = "isPipNextEnable", true)
+    }
+
+    /**
+     * 画中画模式下是否开启播放按钮
+     */
+    val isPipPlayEnable by lazy {
+        BooleanItem(name = "isPipPlayEnable", true)
     }
 
     val isGestureControlEnabled by lazy {
-        BooleanItem(name = "isGestureControlEnabled", false)
+        BooleanItem(name = "isGestureControlEnabled", true)
     }
 
     val playbackMode by lazy {

@@ -41,6 +41,24 @@
     <string name="summary_play_is_show_play_mode_button">在视频播放页面，显示播放模式按钮，可切换顺序播放、随机播放</string>
     <string name="label_play_is_show_gesture_button">显示手势操作按钮</string>
     <string name="summary_play_is_show_gesture_button">在视频播放页面，显示手势操作开关，开启后可通过滑动调节亮度和音量</string>
+    <string name="label_play_is_show_pip_button">显示画中画按钮</string>
+    <string name="summary_play_is_show_pip_button">在视频播放页面左下角显示画中画按钮，点击后进入系统画中画模式</string>
+    <string name="pip_action_previous">上一个</string>
+    <string name="pip_action_next">下一个</string>
+    <string name="pip_action_play">播放</string>
+    <string name="pip_action_pause">暂停</string>
+    <string name="pip_button_skip_previous">上一曲</string>
+    <string name="pip_button_play">播放</string>
+    <string name="pip_button_pause">暂停</string>
+    <string name="pip_button_skip_next">下一曲</string>
+    <string name="label_picture_in_picture_enable">画中画</string>
+    <string name="summary_picture_in_picture_enable">开启后，在视频播放过程中回到桌面将会自动进入画中画模式</string>
+    <string name="label_pip_button_skip_previous_enable">显示上一曲按钮</string>
+    <string name="summary_pip_button_skip_previous_enable">在画中画模式中，显示上一曲按钮</string>
+    <string name="label_pip_button_play_enable">显示播放按钮</string>
+    <string name="summary_pip_button_play_enable">在画中画模式中，显示播放按钮</string>
+    <string name="label_pip_button_skip_next_enable">显示下一曲按钮</string>
+    <string name="summary_pip_button_skip_next_enable">在画中画模式中，显示下一曲按钮</string>
     <string name="gesture_control_brightness">亮度: %1$d%%</string>
     <string name="gesture_control_volume">音量: %1$d%%</string>
     <string name="playback_mode_sequential">顺序播放</string>
@@ -73,7 +91,10 @@
     <string name="duplicate_group_title">重复组 %1$d（%2$d 个文件）</string>
     <string name="duplicate_no_result">未发现重复视频</string>
     <string name="duplicate_scanning">正在扫描…</string>
+    <string name="duplicate_progress_extract">正在提取视频特征：%1$d / %2$d</string>
+    <string name="duplicate_progress_compare">正在比对视频：%1$d / %2$d</string>
     <string name="duplicate_delete_confirm_message">确定要删除「%1$s」吗？此操作将同时删除本地文件，且不可恢复。</string>
     <string name="duplicate_duration_format">%1$s（%2$s）</string>
     <string name="duplicate_all">全部</string>
+    <string name="cd_back">返回</string>
 </resources>
